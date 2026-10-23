@@ -1,5 +1,32 @@
 # Changelog — CodeHubb Assistant
 
+## 1.0.6 — 2026-10-23
+
+- **Pairing-code linking for WhatsApp — an alternative to the QR.**
+  The wizard's WhatsApp group gains a pairing-method selector: **QR
+  code** (unchanged) or **Pairing code**. In code mode you enter the
+  number of the account being linked (prefilled from the allowlist,
+  editable; Start stays disabled under 10 digits), the bridge requests
+  an 8-character code from WhatsApp once its socket is ready to pair
+  (`requestPairingCode`, fired once per socket at the first
+  pairing-ready update), and the wizard shows the code large, grouped
+  4-4. On the phone it is typed under Linked devices → Link a device →
+  "Link with phone number instead". If the code request fails, the
+  bridge logs why and the QR flow simply continues as the fallback.
+  This is a different linking mechanism that is sometimes accepted
+  where QR linking is refused — it is **not** a guarantee: the refusal
+  comes from WhatsApp's side and it can decline the code too (the guide
+  says so, next to the method). Phone numbers are only ever logged
+  masked to their last 4 digits.
+- **Every wizard pairing attempt now starts pristine.** Before the
+  bridge spawns, any WhatsApp sign-in state that is not a *completed*
+  pairing (creds missing, unreadable, or `registered` not true) is
+  cleared, with one line about it in `pairing.log` — stale partial auth
+  from failed attempts is a prime suspect in repeated refusals. A
+  registered, successfully paired session is **never** cleared: the
+  registration marker is checked before anything is deleted. The
+  agent's own sidecar runs are untouched by this.
+
 ## 1.0.5 — 2026-10-23
 
 - **WhatsApp pairing hardening.** The owner reached the wizard QR, but

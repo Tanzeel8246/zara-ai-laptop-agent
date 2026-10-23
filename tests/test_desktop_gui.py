@@ -161,7 +161,7 @@ def test_wizard_pairing_panel_with_fake_session(qapp, tmp_path):
             self.started = False
             self.stopped = False
 
-        def start(self):
+        def start(self, method="qr", number=""):
             self.started = True
             return PairingStatus("waiting_qr", qr="QRDATA", detail="Scan the QR code")
 
@@ -254,7 +254,7 @@ def test_qr_label_caps_pixmap_at_320(qapp):
     )
 
     class FakeSession:
-        def start(self):
+        def start(self, method="qr", number=""):
             return PairingStatus("waiting_qr", qr=long_payload, detail="scan")
 
         def poll(self):
@@ -269,4 +269,105 @@ def test_qr_label_caps_pixmap_at_320(qapp):
     assert pixmap is not None and not pixmap.isNull()
     assert pixmap.width() <= 320
     assert pixmap.height() <= 320
+    fields.stop_pairing()
+
+
+# ------------------------------------------------------- hotfix 1.0.6
+
+def test_transports_fields_code_mode_flow(qapp):
+    """Pairing-code mode: Start is gated on a >=10 digit number, the
+    session receives method+number, and the polled code is displayed
+    prominently (grouped 4-4) until pairing stops."""
+    from desktop.fields import TransportsFields
+    from desktop.pairing import PairingStatus
+
+    class FakeSession:
+        def __init__(self):
+            self.start_args = None
+            self.stopped = False
+
+        def start(self, method="qr", number=""):
+            self.start_args = (method, number)
+            return PairingStatus("starting", detail="Starting the bridge…")
+
+        def poll(self):
+            return PairingStatus(
+                "waiting_code", pairing_code="ABCDEFGH",
+                detail="Enter the code",
+            )
+
+        def stop(self):
+            self.stopped = True
+
+    fake = FakeSession()
+    fields = TransportsFields(pairing_factory=lambda: fake)
+    # QR mode is the default: code widgets hidden, Start always enabled
+    assert fields.pair_qr_radio.isChecked()
+    assert fields.pair_number.isHidden()
+    assert fields.pair_code_label.isHidden()
+    assert fields.pair_button.isEnabled()
+    # code mode: number appears, Start waits for a real number
+    fields.pair_code_radio.setChecked(True)
+    assert not fields.pair_number.isHidden()
+    assert not fields.pair_button.isEnabled()
+    fields.pair_number.setText("12345")
+    assert not fields.pair_button.isEnabled()
+    fields.pair_number.setText("+92 300-1234567")
+    assert fields.pair_button.isEnabled()
+    fields.start_pairing()
+    assert fake.start_args == ("code", "923001234567")
+    assert not fields.pair_button.isEnabled()  # running
+    # the next poll brings the code -> prominent display, grouped 4-4
+    fields.poll_pairing()
+    assert fields.pair_status.text() == "Enter the code"
+    assert fields.pair_code_label.text() == "ABCD-EFGH"
+    assert not fields.pair_code_label.isHidden()
+    fields.stop_pairing()
+    assert fake.stopped is True
+    assert fields.pair_code_label.text() == ""
+    assert fields.pair_code_label.isHidden()
+
+
+def test_transports_fields_code_number_prefill(qapp):
+    """The pairing number is prefilled from the first allowed number and
+    stays editable."""
+    from desktop.fields import TransportsFields
+    from desktop.settings_model import Settings
+
+    fields = TransportsFields()
+    settings = Settings()
+    settings.whatsapp_allowed_numbers = "923001234567, 923217654321"
+    fields.load(settings)
+    assert fields.pair_number.text() == "923001234567"
+    # typing the allowlist first entry later also fills an empty field
+    fields.pair_number.setText("")
+    fields.whatsapp_numbers.setText("923339998887")
+    assert fields.pair_number.text() == "923339998887"
+
+
+def test_transports_fields_qr_mode_starts_without_method_args(qapp):
+    """QR mode is byte-for-byte the old behaviour: start() with no
+    method/number, QR rendered as before."""
+    from desktop.fields import TransportsFields
+    from desktop.pairing import PairingStatus
+
+    class FakeSession:
+        def __init__(self):
+            self.start_args = None
+
+        def start(self, *args, **kwargs):
+            self.start_args = (args, kwargs)
+            return PairingStatus("waiting_qr", qr="QRDATA", detail="scan")
+
+        def poll(self):
+            return PairingStatus("waiting_qr", qr="QRDATA", detail="scan")
+
+        def stop(self):
+            pass
+
+    fake = FakeSession()
+    fields = TransportsFields(pairing_factory=lambda: fake)
+    fields.start_pairing()
+    assert fake.start_args == ((), {})
+    assert fields.qr_label.pixmap() is not None
     fields.stop_pairing()

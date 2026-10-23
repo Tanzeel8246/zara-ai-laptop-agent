@@ -27,11 +27,25 @@ const PORT = parseInt(process.env.WA_BRIDGE_PORT || "17331", 10);
 const AUTH_DIR = process.env.WA_AUTH_DIR || path.resolve(".runtime/whatsapp/auth");
 const MEDIA_DIR = process.env.WA_MEDIA_DIR || path.resolve(".runtime/whatsapp/media");
 const QR_FILE = process.env.WA_QR_FILE || path.resolve(".runtime/whatsapp/qr.txt");
+// Pairing-code linking (Hotfix 1.0.6 — wizard pairing only; the agent's
+// supervisor never sets these, so agent runs behave exactly as before):
+// WA_PAIRING_METHOD=code + WA_PAIRING_NUMBER=<international digits> makes
+// the sidecar request an 8-character pairing code from WhatsApp (typed on
+// the phone under "Link with phone number instead") in addition to the
+// QR flow. The code is written to WA_PAIRING_CODE_FILE for the wizard to
+// display. Phone numbers are only ever logged masked to their last 4
+// digits.
+const PAIRING_METHOD = (process.env.WA_PAIRING_METHOD || "qr").toLowerCase();
+const PAIRING_CODE_MODE = PAIRING_METHOD === "code";
+const PAIRING_NUMBER = (process.env.WA_PAIRING_NUMBER || "").replace(/\D/g, "");
+const PAIRING_CODE_FILE =
+  process.env.WA_PAIRING_CODE_FILE || path.resolve(".runtime/whatsapp/pairing-code.txt");
 const LOGGED_OUT_EXIT = 2;
 
 fs.mkdirSync(AUTH_DIR, { recursive: true });
 fs.mkdirSync(MEDIA_DIR, { recursive: true });
 fs.mkdirSync(path.dirname(QR_FILE), { recursive: true });
+fs.mkdirSync(path.dirname(PAIRING_CODE_FILE), { recursive: true });
 
 const logger = pino({ level: "silent" });
 
@@ -272,6 +286,53 @@ async function connect() {
 
   sock.ev.on("creds.update", saveCreds);
 
+  // Pairing-code request (1.0.6). Baileys 6.7.x semantics: the request is
+  // an IQ sent over the socket, so it can only go out once the noise
+  // handshake has completed and the server is in pairing state — the
+  // first `connection.update` carrying a QR is exactly that moment (the
+  // library generates the QR ref only for an unregistered socket that is
+  // ready to pair). The settled flag is scoped to THIS connect() call, so
+  // each fresh socket may ask once; a failed or impossible request marks
+  // it settled too — the QR flow below is never blocked or retried-away,
+  // it simply continues as the fallback.
+  const thisSock = sock;
+  let pairingCodeSettled = false;
+  const maybeRequestPairingCode = async () => {
+    if (!PAIRING_CODE_MODE || pairingCodeSettled) return;
+    pairingCodeSettled = true;
+    if (state.creds.registered) return;
+    if (PAIRING_NUMBER.length < 10) {
+      console.log(
+        "[sidecar] pairing-code mode was requested but no usable pairing " +
+          "number was given (missing or too short); using QR pairing instead"
+      );
+      return;
+    }
+    const masked = `…${PAIRING_NUMBER.slice(-4)}`;
+    try {
+      const code = await thisSock.requestPairingCode(PAIRING_NUMBER);
+      try {
+        fs.writeFileSync(PAIRING_CODE_FILE, code, "utf8");
+      } catch {}
+      console.log(
+        `[sidecar] pairing code for number ${masked}: ${code} — on the ` +
+          "phone: WhatsApp → Linked devices → Link a device → " +
+          "“Link with phone number instead” → enter this code"
+      );
+    } catch (err) {
+      console.log(
+        `[sidecar] pairing-code request for number ${masked} failed ` +
+          `(${err?.message || err}); continuing with QR pairing instead`
+      );
+    }
+  };
+  if (PAIRING_CODE_MODE) {
+    console.log(
+      `[sidecar] pairing-code mode on: a code will be requested for number ` +
+        `…${PAIRING_NUMBER.slice(-4)} when this socket is ready to pair`
+    );
+  }
+
   sock.ev.on("messages.upsert", async ({ messages, type }) => {
     if (type !== "notify") return;
     for (const msg of messages) {
@@ -299,12 +360,18 @@ async function connect() {
       });
       waState = { type: "waiting", reason: "pairing" };
       broadcast(waState);
+      // Pairing-code mode: the socket is now ready to pair — ask for the
+      // code (once per socket; failure leaves this QR flow untouched).
+      maybeRequestPairingCode();
     }
     if (connection === "open") {
       reconnectDelay = 2000;
       ownJid = sock.user?.id || "";
       try {
         fs.rmSync(QR_FILE, { force: true });
+      } catch {}
+      try {
+        fs.rmSync(PAIRING_CODE_FILE, { force: true });
       } catch {}
       console.log(`[sidecar] WhatsApp connected as ${ownJid}`);
       waState = { type: "ready", ownJid };

@@ -8,4 +8,4 @@ in step by tests/test_version.py and by packaging/build_windows.ps1,
 which refuses to build when they disagree.
 """
 
-__version__ = "1.0.5"
+__version__ = "1.0.6"

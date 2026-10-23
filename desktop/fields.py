@@ -17,6 +17,7 @@ from PySide6.QtWidgets import (
     QLabel,
     QLineEdit,
     QPushButton,
+    QRadioButton,
     QSpinBox,
     QVBoxLayout,
     QWidget,
@@ -294,6 +295,23 @@ class TransportsFields(QWidget):
         self.whatsapp_numbers = QLineEdit()
         w_layout.addWidget(self.whatsapp_numbers)
 
+        method_row = QHBoxLayout()
+        method_row.addWidget(QLabel("Pairing method:"))
+        self.pair_qr_radio = QRadioButton("QR code")
+        self.pair_code_radio = QRadioButton("Pairing code")
+        self.pair_qr_radio.setChecked(True)
+        method_row.addWidget(self.pair_qr_radio)
+        method_row.addWidget(self.pair_code_radio)
+        method_row.addStretch(1)
+        w_layout.addLayout(method_row)
+        self.pair_number_label = QLabel(
+            "Number of the WhatsApp account you are linking, with country code:"
+        )
+        w_layout.addWidget(self.pair_number_label)
+        self.pair_number = QLineEdit()
+        self.pair_number.setPlaceholderText("e.g. 923001234567")
+        w_layout.addWidget(self.pair_number)
+
         pair_row = QHBoxLayout()
         self.pair_button = QPushButton("Start pairing")
         self.pair_button.clicked.connect(self.start_pairing)
@@ -310,14 +328,27 @@ class TransportsFields(QWidget):
         )
         self.pair_status.setWordWrap(True)
         w_layout.addWidget(self.pair_status)
-        pair_tips = QLabel(
+        self.pair_code_label = QLabel("")
+        self.pair_code_label.setAlignment(Qt.AlignmentFlag.AlignCenter)
+        self.pair_code_label.setStyleSheet("font-size: 30px; font-weight: bold;")
+        self.pair_code_label.setVisible(False)
+        w_layout.addWidget(self.pair_code_label)
+        self.pair_code_help = QLabel(
+            "On your phone: WhatsApp → Linked devices → Link a device → "
+            "“Link with phone number instead” → enter the code shown here. "
+            "This asks for the same link a different way — WhatsApp can "
+            "still decline it."
+        )
+        self.pair_code_help.setWordWrap(True)
+        w_layout.addWidget(self.pair_code_help)
+        self.pair_tips = QLabel(
             "Scanning tips: use the official WhatsApp app → Settings → "
             "Linked devices → Link a device (not the camera). If several "
             "attempts fail, WhatsApp may pause linking for a while — "
             "wait before retrying."
         )
-        pair_tips.setWordWrap(True)
-        w_layout.addWidget(pair_tips)
+        self.pair_tips.setWordWrap(True)
+        w_layout.addWidget(self.pair_tips)
         self.qr_label = QLabel("")
         self.qr_label.setAlignment(Qt.AlignmentFlag.AlignCenter)
         self.qr_label.setMinimumHeight(0)
@@ -328,6 +359,11 @@ class TransportsFields(QWidget):
         self._pair_timer = QTimer(self)
         self._pair_timer.setInterval(800)
         self._pair_timer.timeout.connect(self.poll_pairing)
+        self.pair_qr_radio.toggled.connect(self._sync_pairing_method)
+        self.pair_code_radio.toggled.connect(self._sync_pairing_method)
+        self.pair_number.textChanged.connect(self._sync_pair_button)
+        self.whatsapp_numbers.textChanged.connect(self._prefill_pair_number)
+        self._sync_pairing_method()
 
     # ------------------------------------------------------------ load/save
 
@@ -340,6 +376,7 @@ class TransportsFields(QWidget):
         self.telegram_token.setText(settings.telegram_token)
         self.telegram_ids.setText(settings.telegram_allowed_user_ids)
         self.whatsapp_numbers.setText(settings.whatsapp_allowed_numbers)
+        self._prefill_pair_number()
 
     def apply(self, settings):
         transports = []
@@ -359,13 +396,64 @@ class TransportsFields(QWidget):
 
     # -------------------------------------------------------------- pairing
 
+    def _first_allowed_number(self):
+        for part in self.whatsapp_numbers.text().split(","):
+            digits = pairing.normalize_pairing_number(part)
+            if digits:
+                return digits
+        return ""
+
+    def _prefill_pair_number(self):
+        """The pairing number defaults to the first allowed number — the
+        account being linked is normally the one allowed to command."""
+        if not self.pair_number.text().strip():
+            first = self._first_allowed_number()
+            if first:
+                self.pair_number.setText(first)
+
+    def _sync_pairing_method(self):
+        code_mode = self.pair_code_radio.isChecked()
+        self.pair_number_label.setVisible(code_mode)
+        self.pair_number.setVisible(code_mode)
+        self.pair_code_help.setVisible(code_mode)
+        self.pair_tips.setVisible(not code_mode)
+        if code_mode:
+            self._prefill_pair_number()
+        self._sync_pair_button()
+
+    def _sync_pair_button(self):
+        if self._pairing is not None:
+            self.pair_button.setEnabled(False)
+            return
+        if self.pair_code_radio.isChecked():
+            digits = pairing.normalize_pairing_number(self.pair_number.text())
+            # Same bar as the sidecar's own sanity check: a real
+            # international number is at least 10 digits.
+            self.pair_button.setEnabled(len(digits) >= 10)
+        else:
+            self.pair_button.setEnabled(True)
+
+    def _set_method_controls_enabled(self, enabled):
+        self.pair_qr_radio.setEnabled(enabled)
+        self.pair_code_radio.setEnabled(enabled)
+        self.pair_number.setEnabled(enabled)
+
     def start_pairing(self):
         if self._pairing is not None:
             return
         self._pairing = self._pairing_factory()
-        status = self._pairing.start()
+        if self.pair_code_radio.isChecked():
+            status = self._pairing.start(
+                method="code",
+                number=pairing.normalize_pairing_number(
+                    self.pair_number.text()
+                ),
+            )
+        else:
+            status = self._pairing.start()
         self.pair_button.setEnabled(False)
         self.pair_stop_button.setEnabled(True)
+        self._set_method_controls_enabled(False)
         self._pair_timer.start()
         self._show_pairing_status(status)
 
@@ -377,6 +465,10 @@ class TransportsFields(QWidget):
     def _show_pairing_status(self, status):
         if status.detail:
             self.pair_status.setText(status.detail)
+        code = getattr(status, "pairing_code", "")
+        if code:
+            self.pair_code_label.setText(pairing.format_pairing_code(code))
+            self.pair_code_label.setVisible(True)
         if status.state == "waiting_qr" and status.qr:
             data = pairing.make_qr_png_bytes(status.qr)
             pixmap = QPixmap()
@@ -406,8 +498,11 @@ class TransportsFields(QWidget):
             except Exception:  # noqa: BLE001 - leaving the page must never crash
                 pass
             self._pairing = None
-        self.pair_button.setEnabled(True)
+        self.pair_code_label.setText("")
+        self.pair_code_label.setVisible(False)
         self.pair_stop_button.setEnabled(False)
+        self._set_method_controls_enabled(True)
+        self._sync_pair_button()
 
 
 class BehaviourFields(QWidget):
