@@ -205,8 +205,9 @@ downloads once) — fully offline, just slower.
 Right-click the tray icon → **Run Diagnostics**. You get a plain-text
 report: version, configuration check results, which transports are
 configured (booleans only — **never your keys or tokens**), license
-state, and recent log tails. **Copy** it and send it with your support
-message — it is designed to be safe to share.
+state, recent log tails, and — when present — the WhatsApp pairing and
+sidecar logs, so a bridge crash shows its real error. **Copy** it and
+send it with your support message — it is designed to be safe to share.
 
 The tray menu also has **Audit Log…**: a table of every tool call the
 assistant made, what was allowed, confirmed or denied. Check it any time
@@ -220,6 +221,7 @@ you want to know exactly what your assistant did.
 | "You are not authorised" / messages ignored | Your ID/number is not on that transport's allowlist, or you pasted the bot's ID instead of your own. Re-check in Settings. |
 | WhatsApp QR never appears or pairing fails | The sidecar needs Node.js 18+. The app normally resolves/downloads Node itself; check Diagnostics, then restart the agent. Re-pair from the wizard's Transports page. |
 | Pairing (or the agent) says the WhatsApp bridge packages are installing, or the install failed | First pairing — and the agent's first start — installs the bridge packages **automatically** (1.0.2+); on a slow connection it can take a couple of minutes, so just leave it running. If the automatic install fails, the message shows npm's own error plus the fallback: run `npm install` once inside the `sidecar` folder by hand, then retry. |
+| "The WhatsApp bridge stopped (exit code 1)" during pairing | Read the error lines shown **under** that message (1.0.3+) — they are the bridge's own last output, also saved in `.runtime/whatsapp/pairing.log`. If the message says another copy of the bridge is already running (or the lines mention `EADDRINUSE` / "address already in use"), an earlier bridge is still holding the port: end the `node.exe` process(es) in Task Manager — or restart the PC — then start pairing again. For anything else, send the shown lines (or a Diagnostics report, which includes both WhatsApp logs) with your support message. |
 | WhatsApp stopped working days later | The linked session may have been logged out (or the number restricted — see the disclaimer). Re-pair with the QR; consider a fresh dedicated number. |
 | Voice notes are ignored / very slow | First voice note downloads the offline speech model once. Add a free Groq key for ~1-second transcription. |
 | Assistant stops mid-task | It hit the step limit (`MAX_ITERATIONS`). Send "continue", or raise the limit in Settings. |

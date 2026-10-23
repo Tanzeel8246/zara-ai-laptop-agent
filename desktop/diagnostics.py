@@ -3,8 +3,10 @@
 One plain-text report the user can copy or save and send to support:
 versions, what config validation complains about, whether each transport
 is configured (booleans only — a secret VALUE never appears here), whether
-Node/the sidecar/keyring are available, and the tails of the audit log and
-the agent shell log. Every fact-gatherer is injectable for tests.
+Node/the sidecar/keyring are available, and the tails of the audit log,
+the agent shell log and — when present — the WhatsApp pairing and
+sidecar logs, so a bridge crash is visible in the bundle. Every
+fact-gatherer is injectable for tests.
 """
 
 import platform
@@ -53,6 +55,8 @@ def build_report(
     keyring_ok=None,
     audit_lines=None,
     shell_log_lines=None,
+    pairing_log_lines=None,
+    sidecar_log_lines=None,
     license_info=None,
 ):
     root = Path(root) if root else ROOT
@@ -74,6 +78,11 @@ def build_report(
         audit_lines = _tail(runtime / "audit.jsonl", 20)
     if shell_log_lines is None:
         shell_log_lines = _tail(runtime / "agent-shell.log", 40)
+    wa_dir = runtime / "whatsapp"
+    if pairing_log_lines is None and (wa_dir / "pairing.log").exists():
+        pairing_log_lines = _tail(wa_dir / "pairing.log", 15)
+    if sidecar_log_lines is None and (wa_dir / "sidecar.log").exists():
+        sidecar_log_lines = _tail(wa_dir / "sidecar.log", 15)
 
     out = []
     out.append(f"{config.product_name} — diagnostics")
@@ -143,5 +152,13 @@ def build_report(
         out.extend(f"  {line}" for line in shell_log_lines)
     else:
         out.append("  (no shell log yet — the agent has not been started from the app)")
+    if pairing_log_lines:
+        out.append("")
+        out.append("WhatsApp pairing log (last 15 lines):")
+        out.extend(f"  {line}" for line in pairing_log_lines)
+    if sidecar_log_lines:
+        out.append("")
+        out.append("WhatsApp sidecar log (last 15 lines):")
+        out.extend(f"  {line}" for line in sidecar_log_lines)
     out.append("")
     return "\n".join(out)

@@ -1,6 +1,7 @@
 """Diagnostics assembly, brain-connection probe, autostart command building,
 WhatsApp pairing state machine, and the transport-neutral help text."""
 
+import subprocess
 import sys
 
 from types import SimpleNamespace
@@ -43,6 +44,48 @@ def test_diagnostics_handles_empty_logs(tmp_path):
     assert "(none)" in report
     assert "audit log is empty" in report
     assert "no shell log yet" in report
+
+
+def test_diagnostics_includes_whatsapp_logs_when_present(tmp_path):
+    wa = tmp_path / ".runtime" / "whatsapp"
+    wa.mkdir(parents=True)
+    (wa / "pairing.log").write_text(
+        "===== pairing session 2026-10-23T10:00:00 (port 17331) =====\n"
+        "Error: listen EADDRINUSE: address already in use\n",
+        encoding="utf-8",
+    )
+    (wa / "sidecar.log").write_text(
+        "bridge starting\nconnection closed\n", encoding="utf-8"
+    )
+    report = diagnostics.build_report(
+        root=tmp_path, problems=[], warnings=[], transports=[],
+        node_present=True, sidecar_ready=True, keyring_ok=True,
+        audit_lines=[], shell_log_lines=[],
+    )
+    assert "WhatsApp pairing log (last 15 lines):" in report
+    assert "EADDRINUSE" in report
+    assert "WhatsApp sidecar log (last 15 lines):" in report
+    assert "connection closed" in report
+
+
+def test_diagnostics_whatsapp_logs_injectable_and_absent_otherwise(tmp_path):
+    report = diagnostics.build_report(
+        root=tmp_path, problems=[], warnings=[], transports=[],
+        node_present=True, sidecar_ready=True, keyring_ok=True,
+        audit_lines=[], shell_log_lines=[],
+        pairing_log_lines=["injected pairing line"],
+        sidecar_log_lines=["injected sidecar line"],
+    )
+    assert "injected pairing line" in report
+    assert "injected sidecar line" in report
+    # no files on disk and nothing injected -> no WhatsApp sections at all
+    report = diagnostics.build_report(
+        root=tmp_path, problems=[], warnings=[], transports=[],
+        node_present=True, sidecar_ready=True, keyring_ok=True,
+        audit_lines=[], shell_log_lines=[],
+    )
+    assert "WhatsApp pairing log" not in report
+    assert "WhatsApp sidecar log" not in report
 
 
 def test_diagnostics_never_prints_secret_values(tmp_path, monkeypatch):
@@ -342,6 +385,107 @@ def test_pairing_logged_out_exit(tmp_path):
     proc._rc = 2
     status = session.poll()
     assert status.state == "logged_out"
+
+
+# ------------------------------------- pairing log capture (Hotfix 1.0.3)
+
+def _pairing_with_kwargs(tmp_path, proc):
+    (tmp_path / "sidecar" / "node_modules").mkdir(parents=True)
+    captured = {}
+
+    def factory(cmd, **kw):
+        captured.update(kw)
+        return proc
+
+    session = pairing.PairingSession(root=tmp_path, node="node", popen=factory)
+    return session, captured
+
+
+def _bridge_says(session, *lines):
+    """Simulate the sidecar writing to pairing.log before it dies."""
+    with open(session.log_file, "a", encoding="utf-8") as fh:
+        for line in lines:
+            fh.write(line + "\n")
+
+
+def test_pairing_sidecar_output_goes_to_log_file(tmp_path):
+    proc = FakeSidecarProc()
+    session, captured = _pairing_with_kwargs(tmp_path, proc)
+    session.start()
+    # the output is captured, never discarded: stdout is the log handle
+    assert captured["stdout"] is not subprocess.DEVNULL
+    assert captured["stderr"] == subprocess.STDOUT
+    assert session.log_file.exists()
+    assert "pairing session" in session.log_file.read_text(encoding="utf-8")
+    session.stop()
+
+
+def test_pairing_crash_shows_bridge_log_tail(tmp_path):
+    proc = FakeSidecarProc()
+    session = _pairing(tmp_path, proc)
+    session.start()
+    _bridge_says(
+        session,
+        "starting bridge",
+        "Error: Cannot find module '@whiskeysockets/baileys'",
+        "    at Module._resolveFilename (node:internal/modules/cjs/loader:1207:15)",
+    )
+    proc._rc = 1
+    status = session.poll()
+    assert status.state == "stopped"
+    assert status.detail.startswith("The WhatsApp bridge stopped (exit code 1).")
+    assert "Cannot find module" in status.detail
+
+
+def test_pairing_crash_addr_in_use_gets_friendly_lead(tmp_path):
+    proc = FakeSidecarProc()
+    session = _pairing(tmp_path, proc)
+    session.start()
+    _bridge_says(
+        session,
+        "Error: listen EADDRINUSE: address already in use 127.0.0.1:17331",
+    )
+    proc._rc = 1
+    status = session.poll()
+    assert status.state == "stopped"
+    assert status.detail.startswith(
+        "Another copy of the WhatsApp bridge is already running"
+    )
+    assert "Task Manager" in status.detail
+    # the original stopped line and the bridge's own line still ride along
+    assert "exit code 1" in status.detail
+    assert "EADDRINUSE" in status.detail
+
+
+def test_pairing_crash_tail_is_trimmed_to_last_six_lines(tmp_path):
+    proc = FakeSidecarProc()
+    session = _pairing(tmp_path, proc)
+    session.start()
+    _bridge_says(session, *[f"bridge line {i}" for i in range(10)], "")
+    proc._rc = 1
+    status = session.poll()
+    assert "bridge line 9" in status.detail
+    assert "bridge line 4" in status.detail
+    assert "bridge line 3" not in status.detail
+
+
+def test_pairing_log_tail_ignores_earlier_sessions(tmp_path):
+    # a previous session's EADDRINUSE must not be blamed on this run
+    wa = tmp_path / ".runtime" / "whatsapp"
+    wa.mkdir(parents=True)
+    (wa / "pairing.log").write_text(
+        "===== pairing session 2026-01-01T00:00:00 (port 17331) =====\n"
+        "Error: listen EADDRINUSE: address already in use\n",
+        encoding="utf-8",
+    )
+    proc = FakeSidecarProc()
+    session = _pairing(tmp_path, proc)
+    session.start()
+    _bridge_says(session, "Error: something else broke")
+    proc._rc = 1
+    status = session.poll()
+    assert not status.detail.startswith("Another copy")
+    assert "something else broke" in status.detail
 
 
 def test_qr_png_rendering():

@@ -8,6 +8,7 @@ Two levels, both fully offline:
 """
 
 import asyncio
+import contextlib
 import json
 from pathlib import Path
 from types import SimpleNamespace
@@ -280,3 +281,96 @@ async def test_supervisor_packages_already_present_skips_install(monkeypatch, tm
     monkeypatch.setattr(sidecar_setup, "install_packages", forbidden_install)
     transport, _session = make_transport(monkeypatch)
     assert await transport._ensure_sidecar_packages("node") is True
+
+
+# --------------------------------------- sidecar log capture (Hotfix 1.0.3)
+
+class _FakeStdout:
+    def __init__(self, lines):
+        self._lines = list(lines)
+
+    async def readline(self):
+        return self._lines.pop(0) if self._lines else b""
+
+
+async def test_pump_output_persists_sidecar_log(monkeypatch, tmp_path, capsys):
+    transport, _session = make_transport(monkeypatch)
+    log_path = tmp_path / "whatsapp" / "sidecar.log"
+    proc = SimpleNamespace(stdout=_FakeStdout([
+        b"bridge starting\n",
+        b"Error: listen EADDRINUSE: address already in use\n",
+    ]))
+    await transport._pump_output(proc, log_path)
+    written = log_path.read_text(encoding="utf-8")
+    assert "bridge starting" in written
+    assert "EADDRINUSE" in written
+    # the console relay still shows the lines, as before
+    assert "bridge starting" in capsys.readouterr().out
+
+
+def test_sidecar_log_tail_skips_blanks_and_headers(tmp_path):
+    log_path = tmp_path / "sidecar.log"
+    log_path.write_text(
+        "===== sidecar session 2026-10-23T10:00:00 =====\n"
+        "line one\n\n"
+        + "".join(f"line {i}\n" for i in range(2, 10)),
+        encoding="utf-8",
+    )
+    assert wt.sidecar_log_tail(log_path) == [f"line {i}" for i in range(4, 10)]
+    assert wt.sidecar_log_tail(tmp_path / "missing.log") == []
+
+
+async def test_supervisor_prints_sidecar_tail_on_unexpected_exit(
+    monkeypatch, tmp_path, capsys
+):
+    """A sidecar death is reported with the bridge's own last lines —
+    in the supervisor's log AND persisted in sidecar.log."""
+    import desktop.node_bootstrap as node_bootstrap
+
+    sidecar_dir = tmp_path / "sidecar"
+    (sidecar_dir / "node_modules").mkdir(parents=True)
+    monkeypatch.setattr(wt, "SIDECAR_DIR", sidecar_dir)
+    monkeypatch.setattr(CONFIG, "runtime_dir", tmp_path)
+    monkeypatch.setattr(
+        node_bootstrap, "resolve_node",
+        lambda **kw: SimpleNamespace(path="node", detail=""),
+    )
+
+    class FakeProc:
+        def __init__(self):
+            self.returncode = None
+            self.stdout = _FakeStdout([
+                b"bridge starting\n",
+                b"Error: listen EADDRINUSE: address already in use 127.0.0.1:17331\n",
+            ])
+
+        async def wait(self):
+            self.returncode = 1
+            return 1
+
+        def terminate(self):
+            self.returncode = 0
+
+    async def fake_exec(*args, **kwargs):
+        return FakeProc()
+
+    monkeypatch.setattr(asyncio, "create_subprocess_exec", fake_exec)
+    transport, _session = make_transport(monkeypatch)
+    task = asyncio.create_task(transport._supervise())
+    captured = {"err": ""}
+
+    def drained():
+        captured["err"] += capsys.readouterr().err
+        return "Last sidecar output" in captured["err"]
+
+    try:
+        assert await wait_for(drained, timeout=5)
+        assert "EADDRINUSE" in captured["err"]
+        log_text = (tmp_path / "whatsapp" / "sidecar.log").read_text(encoding="utf-8")
+        assert "sidecar session" in log_text      # session header stamped
+        assert "EADDRINUSE" in log_text           # bridge lines persisted
+    finally:
+        transport.stop()
+        task.cancel()
+        with contextlib.suppress(asyncio.CancelledError):
+            await task
