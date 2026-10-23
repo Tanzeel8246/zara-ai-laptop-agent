@@ -48,6 +48,10 @@ class DiscordChannel:
     def channel_id(self):
         return self.channel.id
 
+    @property
+    def session_key(self):
+        return f"discord:{self.channel.id}"
+
     def typing(self):
         return self.channel.typing()
 
