@@ -1,4 +1,6 @@
 discord.py>=2.3.2
+python-telegram-bot>=21
+websockets>=12
 anthropic>=0.40.0
 litellm>=1.40.0
 keyring>=24.0
