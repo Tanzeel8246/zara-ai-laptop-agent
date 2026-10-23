@@ -12,6 +12,7 @@ import contextlib
 
 from . import voice
 from .config import CONFIG
+from .transport import session_key_of
 
 HELP = """**{name} - your laptop, from your phone**
 
@@ -47,7 +48,7 @@ class AgentSession:
 
     async def handle_message(self, msg):
         chan = msg.channel
-        key = chan.channel_id
+        key = session_key_of(chan)
         text = (msg.text or "").strip()
 
         if text.startswith("/"):
