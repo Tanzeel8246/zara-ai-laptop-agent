@@ -4,7 +4,7 @@ cd /d "%~dp0"
 
 echo.
 echo  ==========================================
-echo   LapPilot - installing
+echo   CodeHubb Assistant - installing
 echo  ==========================================
 echo.
 

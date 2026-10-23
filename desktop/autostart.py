@@ -1,6 +1,6 @@
 """Windows autostart toggle (Qt-free).
 
-Creates/removes the Startup-folder shortcut exactly the way START_ZARA.bat
+Creates/removes the Startup-folder shortcut exactly the way START.bat
 has always done it: a .lnk in the user's Startup folder pointing at
 wscript.exe running lappilot-hidden.vbs (which launches the agent hidden).
 The only deliberate change is the shortcut name — it carries the product
@@ -46,7 +46,7 @@ def _ps_quote(text):
 
 
 def build_create_command(root=None, product_name="CodeHubb Assistant", env=None):
-    """The PowerShell one-liner (mirrors START_ZARA.bat step 3)."""
+    """The PowerShell one-liner (mirrors START.bat step 3)."""
     root = Path(root) if root else ROOT
     link = shortcut_path(product_name, env)
     vbs = root / "lappilot-hidden.vbs"

@@ -18,6 +18,6 @@ powershell -NoProfile -Command ^
 
 echo.
 echo  She will no longer start or restart by herself.
-echo  (If she is running right now, use STOP_ZARA.bat to stop her.)
+echo  (If she is running right now, use STOP.bat to stop her.)
 echo.
 pause
