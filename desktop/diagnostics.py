@@ -12,7 +12,7 @@ import shutil
 import sys
 from pathlib import Path
 
-from agent import __version__ as agent_version
+from agent.version import __version__ as agent_version
 from agent import config as agent_config
 from agent import secrets as agent_secrets
 

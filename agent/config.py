@@ -198,6 +198,19 @@ class Config:
     # Headless by default; set BROWSER_HEADLESS=false to watch it work.
     browser_headless = _bool("BROWSER_HEADLESS", "true")
 
+    # ---- packaging / updates (Phase 5) ----
+    # Product version (single source of truth: agent/version.py).
+    from .version import __version__ as version
+    # Auto-update feed: a static JSON URL published by the seller,
+    # {version, url, sha256, notes, mandatory?}. BLANK (the default) =
+    # development build: the updater is disabled and the tray shows no
+    # update items at all.
+    update_feed_url = os.getenv("UPDATE_FEED_URL", "").strip()
+    # Escape hatch for the WhatsApp sidecar's Node.js: an explicit path to
+    # a node binary. Blank = auto-resolve (system Node 18+, then a bundled
+    # portable Node, then an offered download — desktop/node_bootstrap.py).
+    node_binary = os.getenv("NODE_BINARY", "").strip()
+
     max_tool_output = 6000          # chars of tool output handed back to the model
     discord_msg_limit = 1900        # Discord hard limit is 2000
     runtime_dir = ROOT / ".runtime"

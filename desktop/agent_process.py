@@ -17,10 +17,23 @@ from pathlib import Path
 ROOT = Path(__file__).resolve().parent.parent
 
 
+def agent_command(executable, *, frozen, script="run.py"):
+    """The command line that starts the headless agent.
+
+    Source checkout: [python, run.py]. Frozen bundle (Phase 5): there is
+    no run.py file and sys.executable is the app itself, so the same exe
+    is relaunched with --run-agent, which desktop.app.main() dispatches
+    to agent.main.run() in-process (see run_app.py / packaging spec)."""
+    if frozen:
+        return [str(executable), "--run-agent"]
+    return [str(executable), script]
+
+
 class AgentProcess:
-    def __init__(self, root=None, python_exe=None, log_path=None, popen=None):
+    def __init__(self, root=None, python_exe=None, log_path=None, popen=None, frozen=None):
         self.root = Path(root) if root else ROOT
         self.python_exe = python_exe or sys.executable
+        self.frozen = bool(getattr(sys, "frozen", False)) if frozen is None else bool(frozen)
         self.log_path = (
             Path(log_path) if log_path else self.root / ".runtime" / "agent-shell.log"
         )
@@ -72,7 +85,8 @@ class AgentProcess:
         if sys.platform.startswith("win"):
             # No console window flashing over the user's desktop.
             kwargs["creationflags"] = getattr(subprocess, "CREATE_NO_WINDOW", 0)
-        self._proc = self._popen([self.python_exe, "run.py"], **kwargs)
+        command = agent_command(self.python_exe, frozen=self.frozen)
+        self._proc = self._popen(command, **kwargs)
         return True
 
     def stop(self, timeout=5.0):

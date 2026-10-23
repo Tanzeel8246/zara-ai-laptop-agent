@@ -11,6 +11,11 @@ license_server/*.db
 .venv/
 .runtime/
 node_modules/
+
+# Phase 5: PyInstaller output + staged Playwright browsers are build artifacts
+build/
+dist/
+packaging/browsers/
 __pycache__/
 *.pyc
 *.pyo

@@ -6,9 +6,11 @@ First run (no .env yet, or configuration problems) opens the wizard
 automatically. Quitting the shell stops the agent.
 """
 
+import os
+import subprocess
 import sys
 
-from PySide6.QtCore import QTimer
+from PySide6.QtCore import QThread, QTimer, Signal
 from PySide6.QtGui import QAction, QIcon
 from PySide6.QtWidgets import (
     QApplication,
@@ -65,13 +67,42 @@ class DiagnosticsDialog(QDialog):
                 handle.write(self.text.toPlainText())
 
 
+class _UpdateThread(QThread):
+    """Runs one updater operation (check/download) off the UI thread."""
+
+    done = Signal(object, object)  # (result, error_text)
+
+    def __init__(self, fn, parent=None):
+        super().__init__(parent)
+        self._fn = fn
+
+    def run(self):
+        try:
+            self.done.emit(self._fn(), None)
+        except Exception as exc:  # noqa: BLE001 - shown to the user verbatim
+            self.done.emit(None, str(exc))
+
+
+def _default_updater():
+    try:
+        from agent.updater import get_updater
+
+        return get_updater()
+    except Exception:  # noqa: BLE001 - updates must never break the tray
+        return None
+
+
 class TrayController(QWidget):
     """Owns the tray icon, the agent process and every window it opens."""
 
-    def __init__(self, app, *, env_path=None, auto_open_wizard=True):
+    def __init__(self, app, *, env_path=None, auto_open_wizard=True,
+                 updater="default", update_popen=None):
         super().__init__()
         self.app = app
         self.env_path = env_path
+        self.updater = _default_updater() if updater == "default" else updater
+        self._update_popen = update_popen or subprocess.Popen
+        self._update_thread = None
         icons.ensure_icons()
         self.agent = AgentProcess()
         self._last_exit_code = None
@@ -104,6 +135,23 @@ class TrayController(QWidget):
         diag_action = QAction("Run Diagnostics", menu)
         diag_action.triggered.connect(self.open_diagnostics)
         menu.addAction(diag_action)
+        # Phase 5: auto-update items exist ONLY when an update feed is
+        # configured (release builds). Development builds — no feed URL —
+        # show nothing at all, and the Restart item stays hidden until an
+        # update has actually been downloaded + verified (staged).
+        self.update_check_action = None
+        self.update_restart_action = None
+        if self.updater is not None and self.updater.enabled:
+            self.update_check_action = QAction("Check for Updates", menu)
+            self.update_check_action.triggered.connect(self.check_for_updates)
+            menu.addAction(self.update_check_action)
+            self.update_restart_action = QAction("Restart to Update", menu)
+            self.update_restart_action.triggered.connect(self.apply_update)
+            self.update_restart_action.setVisible(False)
+            menu.addAction(self.update_restart_action)
+        about_action = QAction("About…", menu)
+        about_action.triggered.connect(self.show_about)
+        menu.addAction(about_action)
         menu.addSeparator()
         quit_action = QAction("Quit", menu)
         quit_action.triggered.connect(self.quit)
@@ -170,6 +218,7 @@ class TrayController(QWidget):
         self.tray.setIcon(self._icon_for(state))
         self.start_action.setEnabled(state != "running")
         self.stop_action.setEnabled(state == "running")
+        self._refresh_update_action()
 
     _license_cache = ("", 0.0)
 
@@ -195,6 +244,29 @@ class TrayController(QWidget):
             text = ""
         self._license_cache = (text, time.monotonic())
         return text
+
+    _update_cache = (None, 0.0)
+
+    def _refresh_update_action(self):
+        """Show 'Restart to Update' only while a verified update is staged.
+        Cached like the license suffix: the tray refreshes every second,
+        the staged state does not change that fast."""
+        if self.update_restart_action is None:
+            return
+        import time
+
+        staged, stamp = self._update_cache
+        if time.monotonic() - stamp >= 30:
+            try:
+                staged = self.updater.staged() if self.updater else None
+            except Exception:  # noqa: BLE001 - never break the tray on this
+                staged = None
+            self._update_cache = (staged, time.monotonic())
+        self.update_restart_action.setVisible(bool(staged))
+        if staged:
+            self.update_restart_action.setText(
+                f"Restart to Update (v{staged.get('version', '?')})"
+            )
 
     def _icon_for(self, state):
         filename = {
@@ -253,6 +325,113 @@ class TrayController(QWidget):
         view = AuditView(self)
         view.exec()
 
+    # ------------------------------------------------------- updates (P5)
+
+    def show_about(self):
+        from agent.version import __version__
+
+        name = self.settings.product_name or "CodeHubb Assistant"
+        QMessageBox.about(
+            self, f"About {name}",
+            f"{name}\nVersion {__version__}\n\n"
+            f"Your assistant's name: {self.settings.assistant_name or 'Assistant'}\n"
+            "Control your Windows laptop from your phone — Discord, "
+            "Telegram or WhatsApp.",
+        )
+
+    def check_for_updates(self):
+        if self.updater is None or not self.updater.enabled:
+            return
+        if self._update_thread is not None and self._update_thread.isRunning():
+            return
+        if self.update_check_action is not None:
+            self.update_check_action.setEnabled(False)
+        thread = _UpdateThread(self.updater.check, self)
+        thread.done.connect(self._on_update_check_done)
+        self._update_thread = thread
+        thread.start()
+
+    def _on_update_check_done(self, info, error):
+        if self.update_check_action is not None:
+            self.update_check_action.setEnabled(True)
+        name = self.settings.product_name or "CodeHubb Assistant"
+        if error:
+            QMessageBox.warning(self, "Updates", f"Update check failed:\n\n{error}")
+            return
+        if info is None:
+            from agent.version import __version__
+
+            QMessageBox.information(
+                self, "Updates",
+                f"{name} is up to date (version {__version__}).",
+            )
+            return
+        notes = f"\n\n{info.notes}" if info.notes else ""
+        answer = QMessageBox.question(
+            self, "Update available",
+            f"{name} v{info.version} is available.{notes}\n\n"
+            "Download it now? It installs when you choose "
+            "'Restart to Update' from this menu.",
+            QMessageBox.StandardButton.Yes | QMessageBox.StandardButton.No,
+        )
+        if answer == QMessageBox.StandardButton.Yes:
+            thread = _UpdateThread(lambda: self.updater.download(info), self)
+            thread.done.connect(self._on_update_download_done)
+            self._update_thread = thread
+            thread.start()
+
+    def _on_update_download_done(self, path, error):
+        if error:
+            QMessageBox.warning(self, "Updates", f"Update download failed:\n\n{error}")
+            return
+        self._update_cache = (None, 0.0)  # force the staged re-check
+        self._refresh_update_action()
+        answer = QMessageBox.question(
+            self, "Update ready",
+            "The update was downloaded and verified. Restart now to install it?",
+            QMessageBox.StandardButton.Yes | QMessageBox.StandardButton.No,
+        )
+        if answer == QMessageBox.StandardButton.Yes:
+            self.apply_update()
+
+    def apply_update(self):
+        """Hand the staged installer to packaging/apply_update.ps1 (it
+        waits for THIS process to exit, installs silently, relaunches)
+        and quit. No-op when nothing is staged."""
+        if self.updater is None:
+            return
+        try:
+            staged = self.updater.staged()
+        except Exception:  # noqa: BLE001
+            staged = None
+        if not staged:
+            return
+        from agent.updater import apply_script_path
+
+        script = apply_script_path()
+        relaunch = sys.executable
+        args = [
+            "powershell", "-NoProfile", "-ExecutionPolicy", "Bypass",
+            "-File", str(script),
+            "-Installer", str(staged["path"]),
+            "-WaitPid", str(os.getpid()),
+            "-Relaunch", str(relaunch),
+        ]
+        kwargs = {}
+        if sys.platform.startswith("win"):
+            kwargs["creationflags"] = (
+                getattr(subprocess, "DETACHED_PROCESS", 0)
+                | getattr(subprocess, "CREATE_NEW_PROCESS_GROUP", 0)
+            )
+        try:
+            self._update_popen(args, **kwargs)
+        except Exception as exc:  # noqa: BLE001 - keep the app alive then
+            QMessageBox.warning(
+                self, "Updates", f"Could not start the updater:\n\n{exc}"
+            )
+            return
+        self.quit()
+
     def open_diagnostics(self):
         problems = self._problems()
         warnings = []
@@ -276,8 +455,31 @@ def create_controller(app=None, **kwargs):
     return TrayController(app, **kwargs)
 
 
+def _run_agent_mode():
+    """Frozen-bundle dispatch (Phase 5): `--run-agent` runs the headless
+    agent in-process. In the installer build there is no run.py file for
+    AgentProcess to launch — the app exe relaunches ITSELF with this flag
+    (desktop.agent_process.agent_command), so argv is where the child
+    decides it is the agent, not the tray."""
+    from agent.main import run as agent_run
+
+    try:
+        agent_run()
+    except SystemExit as exc:
+        if exc.code is None:
+            return 0
+        if isinstance(exc.code, int):
+            return exc.code
+        print(exc.code, file=sys.stderr)
+        return 1
+    return 0
+
+
 def main(argv=None):
-    app = QApplication(argv if argv is not None else sys.argv)
+    argv = list(sys.argv if argv is None else argv)
+    if "--run-agent" in argv:
+        return _run_agent_mode()
+    app = QApplication(argv)
     app.setApplicationName("CodeHubb Assistant")
     app.setQuitOnLastWindowClosed(False)
     controller = create_controller(app)

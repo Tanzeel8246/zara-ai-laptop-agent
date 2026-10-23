@@ -15,7 +15,6 @@ The Popen factory is injectable for tests.
 """
 
 import os
-import shutil
 import subprocess
 import sys
 from dataclasses import dataclass
@@ -48,12 +47,28 @@ class PairingSession:
         """Spawn the sidecar for pairing. Returns the first status."""
         if self._proc is not None and self._proc.poll() is None:
             return self.poll()
-        node = self._node or shutil.which("node")
-        if not node:
-            self._error = (
-                "Node.js was not found. Install Node.js 18+ and come back to this page."
-            )
-            return PairingStatus("error", detail=self._error)
+        node = self._node
+        if node is None:
+            # Phase 5: shared Node resolution (system 18+ / bundled portable
+            # / downloaded LTS / NODE_BINARY override) — same decision the
+            # agent's WhatsApp transport makes.
+            from .node_bootstrap import resolve_node
+
+            try:
+                from agent.config import CONFIG
+
+                override = CONFIG.node_binary or None
+            except Exception:  # noqa: BLE001 - pairing must not die on config
+                override = None
+            resolution = resolve_node(whatsapp_enabled=True, override=override)
+            node = resolution.path
+            if not node:
+                self._error = (
+                    "Node.js 18+ was not found. " + resolution.detail
+                    + " Install Node.js, or let the installed app download it, "
+                    "and come back to this page."
+                )
+                return PairingStatus("error", detail=self._error)
         sidecar_dir = self.root / "sidecar"
         if not (sidecar_dir / "node_modules").exists():
             self._error = (

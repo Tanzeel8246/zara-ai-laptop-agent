@@ -23,7 +23,6 @@ import asyncio
 import contextlib
 import json
 import os
-import shutil
 import sys
 import time
 from pathlib import Path
@@ -231,11 +230,20 @@ class WhatsAppTransport:
                 self._proc.terminate()
 
     async def _supervise(self):
-        node = shutil.which("node")
+        # Phase 5: Node resolution is shared with the setup wizard
+        # (desktop/node_bootstrap.py) — NODE_BINARY override, system
+        # Node 18+, a bundled portable Node, or one the app downloaded.
+        from desktop.node_bootstrap import resolve_node
+
+        resolution = resolve_node(
+            whatsapp_enabled=True, override=CONFIG.node_binary or None
+        )
+        node = resolution.path
         if not node:
             print(
-                "\n  [whatsapp] Node.js was not found on this machine, so the WhatsApp "
-                "transport is DISABLED. Install Node.js 18+ and restart to enable it. "
+                "\n  [whatsapp] Node.js 18+ was not found on this machine, so the WhatsApp "
+                f"transport is DISABLED. {resolution.detail} Install Node.js 18+ (or set "
+                "NODE_BINARY in .env) and restart to enable it. "
                 "Other transports are unaffected.\n",
                 file=sys.stderr,
             )

@@ -80,6 +80,14 @@ def _run_transport(transport):
 
 
 def run():
+    # Phase 5: in a frozen bundle, point Playwright at the Chromium build
+    # the installer shipped (no-op in a source checkout without one, and
+    # never overrides an explicitly set PLAYWRIGHT_BROWSERS_PATH). Must
+    # happen before the browser tool lazily imports playwright.
+    from .bundled_paths import ensure_playwright_browsers_path
+
+    ensure_playwright_browsers_path()
+
     if not _single_instance():
         print(f"\n  {CONFIG.product_name} is already running - this extra copy will exit.\n")
         sys.exit(3)  # run.bat treats 3 as 'do not restart'
