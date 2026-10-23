@@ -19,13 +19,41 @@ well.
    an unsigned app, choose **More info → Run anyway** (the installer is
    not yet code-signed; this is expected in the launch release).
 3. At the end of the installer, leave **Launch CodeHubb Assistant** ticked.
-   A tray icon appears near the clock, and the **setup wizard** opens
-   automatically the first time.
+   The **setup wizard** opens automatically the first time; on every
+   later launch the **control window** opens (see below). A tray icon
+   also appears near the clock.
 
 > **Updating:** when a new version is published, the tray icon offers
 > **Check for Updates**. Downloads are verified against a published SHA-256
 > checksum before anything is applied, and **Restart to Update** applies
 > the update for you.
+
+### The control window (running the app)
+
+Since 1.0.9 the app has a visible home: a small **control window** that
+opens at every launch (and right after the setup wizard finishes). It
+shows, live:
+
+- the **agent** state (Running / Stopped / Not configured / Error), and
+- one line per chat app — **Connected**, **Connecting…**, **Retrying…**,
+  **Stopped** or **Disabled** — read from the agent's own log, so what
+  you see is what the agent itself last reported. **Retrying…** is the
+  1.0.7 backoff at work (for example when a network blocks Telegram):
+  the agent stays alive and reconnects on its own.
+
+Buttons: **Start Agent** / **Stop Agent**, **Settings…**, **View Logs**
+(the agent's log file — the same lines the statuses come from) and
+**Quit**.
+
+- **Closing the window does not stop the assistant** — it minimizes to
+  the tray icon near the clock and keeps working. **Quit** (in the
+  window or the tray menu) is the only full stop.
+- Reopen it any time: **double-click the tray icon**, or right-click
+  the tray icon → **Open Control Window**.
+- Started the app twice? The second copy prints *"CodeHubb Assistant
+  is already running"* and steps aside — there is only ever one
+  assistant, and launching from a console also prints a starting line
+  so a launch is never silent.
 
 ## 2. The setup wizard, page by page
 

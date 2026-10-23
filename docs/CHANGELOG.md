@@ -1,5 +1,31 @@
 # Changelog — CodeHubb Assistant
 
+## 1.0.9 — 2026-10-23
+
+- **The app is visible when it runs: a control window at launch.**
+  Found live on the owner's machine — three times in one evening: the
+  shell was only a tray icon (usually hidden in the Windows
+  notification-area overflow) with no console output, so launches
+  looked like the app "won't start" while it was in fact running
+  invisibly. Now a modest control window opens at every launch (and
+  right after the setup wizard completes): live agent status, one
+  status line per chat app, and Start/Stop Agent, Settings…, View
+  Logs and Quit buttons. Closing the window minimizes to the tray —
+  the assistant keeps running — and the tray menu gains **Open
+  Control Window** (double-clicking the tray icon opens it too;
+  double-click no longer silently toggles the agent).
+- **Transport status is read from the agent's own log.** The window's
+  per-transport lines (Connected / Connecting… / Retrying… / Stopped /
+  Disabled) are parsed from `.runtime/agent-shell.log` — the channel
+  the agent already reports through — so a transport sitting in the
+  1.0.7 backoff loop truthfully shows **Retrying…**, and View Logs
+  shows the very lines the statuses came from.
+- **A launch is never silent, and never doubled.** Starting the app
+  prints a startup line to the console before anything else; a second
+  copy is turned away by a single-instance guard (QLockFile) with an
+  "already running — check the system tray / control window" line
+  instead of exiting silently or spawning a twin tray icon.
+
 ## 1.0.8 — 2026-10-23
 
 - **Gemini default moves to a model new users can actually call.**

@@ -1,16 +1,20 @@
 """Tray application — the desktop shell around the headless agent.
 
-Lives in the system tray: status at a glance, start/stop the agent
-subprocess, open the setup wizard, settings, the audit log and diagnostics.
-First run (no .env yet, or configuration problems) opens the wizard
-automatically. Quitting the shell stops the agent.
+Lives in the system tray AND, since Hotfix 1.0.9, in a control window
+(desktop/control_window.py) that opens at launch: status at a glance,
+start/stop the agent subprocess, open the setup wizard, settings, the
+audit log and diagnostics. First run (no .env yet, or configuration
+problems) opens the wizard automatically; the control window follows
+when it completes. Closing the control window minimizes to the tray;
+quitting the shell stops the agent.
 """
 
 import os
 import subprocess
 import sys
+from pathlib import Path
 
-from PySide6.QtCore import QThread, QTimer, Signal
+from PySide6.QtCore import QDir, QLockFile, QThread, QTimer, Signal
 from PySide6.QtGui import QAction, QIcon
 from PySide6.QtWidgets import (
     QApplication,
@@ -27,7 +31,9 @@ from PySide6.QtWidgets import (
 
 from desktop import diagnostics, icons
 from desktop.agent_process import AgentProcess
+from desktop.agent_status import transport_states
 from desktop.audit_view import AuditView
+from desktop.control_window import ControlWindow
 from desktop.settings_dialog import SettingsDialog
 from desktop.settings_model import Settings
 from desktop.wizard import SetupWizard
@@ -67,6 +73,28 @@ class DiagnosticsDialog(QDialog):
                 handle.write(self.text.toPlainText())
 
 
+class AgentLogDialog(QDialog):
+    """The agent's own log tail (.runtime/agent-shell.log) — the same
+    file the control window reads its transport states from."""
+
+    def __init__(self, text, parent=None):
+        super().__init__(parent)
+        self.setWindowTitle("Agent log — latest lines")
+        self.resize(720, 480)
+        layout = QVBoxLayout(self)
+        self.text = QPlainTextEdit(
+            text or "(the agent log is empty — the agent has not run yet)"
+        )
+        self.text.setReadOnly(True)
+        layout.addWidget(self.text, 1)
+        row = QHBoxLayout()
+        row.addStretch(1)
+        close_button = QPushButton("Close")
+        close_button.clicked.connect(self.accept)
+        row.addWidget(close_button)
+        layout.addLayout(row)
+
+
 class _UpdateThread(QThread):
     """Runs one updater operation (check/download) off the UI thread."""
 
@@ -96,10 +124,11 @@ class TrayController(QWidget):
     """Owns the tray icon, the agent process and every window it opens."""
 
     def __init__(self, app, *, env_path=None, auto_open_wizard=True,
-                 updater="default", update_popen=None):
+                 auto_open_window=True, updater="default", update_popen=None):
         super().__init__()
         self.app = app
         self.env_path = env_path
+        self.auto_open_window = auto_open_window
         self.updater = _default_updater() if updater == "default" else updater
         self._update_popen = update_popen or subprocess.Popen
         self._update_thread = None
@@ -115,6 +144,10 @@ class TrayController(QWidget):
         self.status_action = QAction("Status: …", menu)
         self.status_action.setEnabled(False)
         menu.addAction(self.status_action)
+        menu.addSeparator()
+        self.control_action = QAction("Open Control Window", menu)
+        self.control_action.triggered.connect(self.show_control_window)
+        menu.addAction(self.control_action)
         menu.addSeparator()
         self.start_action = QAction("Start Agent", menu)
         self.start_action.triggered.connect(self.start_agent)
@@ -160,6 +193,19 @@ class TrayController(QWidget):
         self.tray.activated.connect(self._on_tray_click)
         self.tray.show()
 
+        # Hotfix 1.0.9: the visible face of the app. Until now the shell
+        # was only a tray icon — usually hidden in the notification-area
+        # overflow — so a launch looked like nothing had happened.
+        self.control_window = ControlWindow(
+            product_name=self.settings.product_name or "CodeHubb Assistant",
+            on_start=self.start_agent,
+            on_stop=self.stop_agent,
+            on_settings=self.open_settings,
+            on_view_logs=self.open_agent_log,
+            on_quit=self.quit,
+            parent=self,
+        )
+
         self._timer = QTimer(self)
         self._timer.setInterval(1000)
         self._timer.timeout.connect(self.refresh_status)
@@ -168,6 +214,10 @@ class TrayController(QWidget):
 
         if auto_open_wizard and self._needs_setup():
             QTimer.singleShot(300, self.open_wizard)
+        elif self.auto_open_window:
+            # Normal launch: be visible. (First run shows the wizard
+            # instead; open_wizard shows this window when it completes.)
+            QTimer.singleShot(300, self.show_control_window)
 
     # ------------------------------------------------------------- state
 
@@ -219,6 +269,29 @@ class TrayController(QWidget):
         self.start_action.setEnabled(state != "running")
         self.stop_action.setEnabled(state == "running")
         self._refresh_update_action()
+        self._push_window_status(state, label)
+
+    def _push_window_status(self, state, label):
+        """Feed the control window from the same state the tray shows.
+
+        Transport states are parsed from the agent's own log tail
+        (desktop.agent_status) — the shell's existing channel — and
+        only while the window is open, so a hidden window costs the
+        once-a-second refresh nothing."""
+        if not self.control_window.isVisible():
+            return
+        states = transport_states(
+            self.agent.read_log_tail(400),
+            self.settings.transports,
+            agent_running=(state == "running"),
+        )
+        self.control_window.update_status(
+            {
+                "agent_text": f"Agent: {label}",
+                "agent_state": state,
+                "transports": states,
+            }
+        )
 
     _license_cache = ("", 0.0)
 
@@ -277,10 +350,18 @@ class TrayController(QWidget):
 
     def _on_tray_click(self, reason):
         if reason == QSystemTrayIcon.ActivationReason.DoubleClick:
-            if self.status() == "running":
-                self.stop_agent()
-            else:
-                self.start_agent()
+            # 1.0.9: double-click opens the control window (it carries
+            # Start/Stop itself) instead of silently toggling the agent.
+            self.show_control_window()
+
+    def show_control_window(self):
+        self.control_window.show()
+        self.control_window.raise_()
+        self.control_window.activateWindow()
+        self.refresh_status()
+
+    def open_agent_log(self):
+        AgentLogDialog(self.agent.read_log_tail(200), self).exec()
 
     # ----------------------------------------------------------- actions
 
@@ -314,6 +395,9 @@ class TrayController(QWidget):
             if wizard.start_agent_requested:
                 self.start_agent()
             self.refresh_status()
+            # Setup is done — from here the control window is the face
+            # of the app (1.0.9), so the user lands somewhere visible.
+            self.show_control_window()
 
     def open_settings(self):
         dialog = SettingsDialog(self._load_settings(), self, env_path=self.env_path)
@@ -455,6 +539,33 @@ def create_controller(app=None, **kwargs):
     return TrayController(app, **kwargs)
 
 
+# Printed by main() before the event loop (Hotfix 1.0.9). Until now a
+# launch printed nothing at all: run from a console, the window came
+# back instantly or sat silent and the app "wasn't starting" — while it
+# sat in the tray. A launch must announce itself.
+STARTING_LINE = (
+    "CodeHubb Assistant is starting — a control window will open; "
+    "the assistant also lives in the system tray (near the clock)."
+)
+ALREADY_RUNNING_LINE = (
+    "CodeHubb Assistant is already running — "
+    "check the system tray / control window."
+)
+SHELL_LOCK_FILE = "codehubb-assistant-shell.lock"
+
+
+def acquire_shell_lock():
+    """Become the one desktop shell on this machine, or return None.
+
+    A QLockFile in the per-user temp dir is shared by every copy of the
+    app (installed build and source folders alike), so a second launch
+    is turned away instead of spawning a twin tray icon. A lock left by
+    a crashed shell names a dead PID, is recognised as stale and is
+    taken over — it can never lock the owner out."""
+    lock = QLockFile(str(Path(QDir.tempPath()) / SHELL_LOCK_FILE))
+    return lock if lock.tryLock(100) else None
+
+
 def _run_agent_mode():
     """Frozen-bundle dispatch (Phase 5): `--run-agent` runs the headless
     agent in-process. In the installer build there is no run.py file for
@@ -479,12 +590,18 @@ def main(argv=None):
     argv = list(sys.argv if argv is None else argv)
     if "--run-agent" in argv:
         return _run_agent_mode()
+    print(STARTING_LINE, flush=True)
     app = QApplication(argv)
     app.setApplicationName("CodeHubb Assistant")
     app.setQuitOnLastWindowClosed(False)
+    lock = acquire_shell_lock()
+    if lock is None:
+        print(ALREADY_RUNNING_LINE, flush=True)
+        return 0
     controller = create_controller(app)
     _ = controller  # kept alive by its tray icon parent chain + app reference below
     app._tray_controller = controller
+    app._shell_lock = lock  # held for the process lifetime
     return app.exec()
 
 
