@@ -1,5 +1,22 @@
 # Changelog — CodeHubb Assistant
 
+## 1.0.4 — 2026-10-23
+
+- **The wizard now checks chat apps before letting you finish.** A
+  switched-on Discord/Telegram group with an empty bot token or
+  allowlist used to save silently — the agent then refused to start and
+  the app bounced the user with a "Setup needed first" dialog. The
+  Transports page now blocks in place, naming the app, what is missing
+  and the remedy (fill it in, or untick the app). Leaving every app
+  unticked is blocked too. The Settings dialog refuses to save the same
+  state, with the same messages — one shared check
+  (`transport_problems`) behind the wizard page, the dialog and
+  `Settings.validate()`.
+- **WhatsApp scanning tips in the pairing panel.** A short hint under
+  the pairing status spells out the official-app route (Settings →
+  Linked devices → Link a device, not the camera) and warns that
+  WhatsApp may pause linking after several failed attempts.
+
 ## 1.0.3 — 2026-10-23
 
 - **A crashed WhatsApp bridge now says why.** The wizard's pairing

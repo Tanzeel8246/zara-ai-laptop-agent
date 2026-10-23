@@ -77,7 +77,9 @@ to confirm everything works before you continue.
 
 ### Page 4 — Chats & messaging
 Enable only the apps you want. Each can be skipped and set up later in
-**Settings**.
+**Settings**. A chat app that is switched on must be filled in: the
+wizard will not let you continue while a ticked app's token/ID (or
+WhatsApp number) is still empty — either complete it or untick the app.
 
 **Discord**
 1. At <https://discord.com/developers/applications>, create an application

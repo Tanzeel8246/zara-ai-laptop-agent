@@ -51,6 +51,75 @@ class SaveResult:
     keyring_ok: bool = True
 
 
+def transport_problems(settings, *, require_one=False):
+    """Transport-completeness problems for a Settings object (Qt-free).
+
+    A chat app that is switched ON must carry the fields the agent needs,
+    or nobody can command it. Hotfix 1.0.4: the setup wizard used to save
+    a checked-but-empty Discord/Telegram group without a word — the app
+    only complained AFTER the wizard finished (the "Setup needed first"
+    bounce). This one function is now the shared check: the wizard's
+    Transports page blocks on it, the settings dialog refuses to save on
+    it, and Settings.validate() reports it. Unchecked groups are ignored
+    entirely. ``require_one`` adds the zero-transports problem (the GUI
+    guard uses it; validate() keeps its historical semantics without it).
+    """
+    problems = []
+    enabled = list(settings.transports or [])
+    if require_one and not enabled:
+        problems.append(
+            "Turn on at least one chat app, or the assistant will have "
+            "no way to reach you."
+        )
+    if "discord" in enabled:
+        no_token = not settings.discord_token
+        no_ids = not agent_config._ids(settings.discord_allowed_user_ids)
+        if no_token and no_ids:
+            problems.append(
+                "Discord is switched on but its bot token and allowed user "
+                "ID are empty. Fill them in, or untick Discord."
+            )
+        elif no_token:
+            problems.append(
+                "Discord is switched on but its bot token is empty. "
+                "Fill it in, or untick Discord."
+            )
+        elif no_ids:
+            problems.append(
+                "Discord is switched on but no allowed user ID is set — "
+                "nobody would be able to command the agent. Fill one in, "
+                "or untick Discord."
+            )
+    if "telegram" in enabled:
+        no_token = not settings.telegram_token
+        no_ids = not agent_config._ids(settings.telegram_allowed_user_ids)
+        if no_token and no_ids:
+            problems.append(
+                "Telegram is switched on but its bot token and allowed "
+                "user ID are empty (create a bot with @BotFather). Fill "
+                "them in, or untick Telegram."
+            )
+        elif no_token:
+            problems.append(
+                "Telegram is switched on but its bot token is empty "
+                "(create one with @BotFather). Fill it in, or untick Telegram."
+            )
+        elif no_ids:
+            problems.append(
+                "Telegram is switched on but no allowed user ID is set — "
+                "nobody would be able to command the agent. Fill one in, "
+                "or untick Telegram."
+            )
+    if "whatsapp" in enabled:
+        if not agent_config._numbers(settings.whatsapp_allowed_numbers):
+            problems.append(
+                "WhatsApp is switched on but no allowed number is set — "
+                "nobody would be able to command the agent. Fill one in, "
+                "or untick WhatsApp."
+            )
+    return problems
+
+
 @dataclass
 class Settings:
     product_name: str = "CodeHubb Assistant"
@@ -208,20 +277,7 @@ class Settings:
     def validate(self):
         """GUI-side validation mirroring agent.config.validate()'s rules,
         evaluated against these settings (not the process-global CONFIG)."""
-        problems = []
-        if "discord" in self.transports:
-            if not self.discord_token:
-                problems.append("Discord is enabled but no bot token is set.")
-            if not agent_config._ids(self.discord_allowed_user_ids):
-                problems.append("Discord is enabled but no allowed user ID is set — nobody would be able to command the agent.")
-        if "telegram" in self.transports:
-            if not self.telegram_token:
-                problems.append("Telegram is enabled but no bot token is set (create one with @BotFather).")
-            if not agent_config._ids(self.telegram_allowed_user_ids):
-                problems.append("Telegram is enabled but no allowed user ID is set — nobody would be able to command the agent.")
-        if "whatsapp" in self.transports:
-            if not agent_config._numbers(self.whatsapp_allowed_numbers):
-                problems.append("WhatsApp is enabled but no allowed number is set — nobody would be able to command the agent.")
+        problems = transport_problems(self)
 
         mode = self._effective_brain()
         if mode == "api":

@@ -11,7 +11,7 @@ from PySide6.QtWidgets import (
 
 from desktop.fields import BehaviourFields, BrainFields, GeneralFields, TransportsFields
 from desktop.license_panel import LicensePanel
-from desktop.settings_model import Settings
+from desktop.settings_model import Settings, transport_problems
 
 
 class SettingsDialog(QDialog):
@@ -65,6 +65,13 @@ class SettingsDialog(QDialog):
         notes = []
         for fields in self._all_fields():
             notes.extend(fields.apply(self.settings))
+        # Hotfix 1.0.4: refuse to save a switched-on-but-empty chat app —
+        # the same guard (and messages) as the wizard's Transports page,
+        # so this dialog can't recreate the state the agent then rejects.
+        problems = transport_problems(self.settings, require_one=True)
+        if problems:
+            QMessageBox.warning(self, "Chats & messaging", "\n\n".join(problems))
+            return
         self.save_result = self.settings.save(self.env_path)
         messages = notes + (self.save_result.warnings if self.save_result else [])
         if messages:

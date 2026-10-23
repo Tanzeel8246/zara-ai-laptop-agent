@@ -310,6 +310,14 @@ class TransportsFields(QWidget):
         )
         self.pair_status.setWordWrap(True)
         w_layout.addWidget(self.pair_status)
+        pair_tips = QLabel(
+            "Scanning tips: use the official WhatsApp app → Settings → "
+            "Linked devices → Link a device (not the camera). If several "
+            "attempts fail, WhatsApp may pause linking for a while — "
+            "wait before retrying."
+        )
+        pair_tips.setWordWrap(True)
+        w_layout.addWidget(pair_tips)
         self.qr_label = QLabel("")
         self.qr_label.setAlignment(Qt.AlignmentFlag.AlignCenter)
         self.qr_label.setMinimumHeight(0)
