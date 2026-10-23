@@ -16,7 +16,7 @@ from .transport import session_key_of
 
 HELP = """**{name} - your laptop, from your phone**
 
-Talk to me in plain English - by text OR by voice (hold the mic in Discord to send a voice note).
+Talk to me in plain English - by text OR by voice note (just send a voice message from your chat app).
 I understand English and Urdu, and I'll reply by voice when you talk to me by voice.
 
 > what's on my screen right now?
