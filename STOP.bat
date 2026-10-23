@@ -1,10 +1,10 @@
 @echo off
 setlocal
 cd /d "%~dp0"
-title Stop Zara
+title Stop CodeHubb Assistant
 
 echo.
-echo  Stopping Zara...
+echo  Stopping CodeHubb Assistant...
 echo.
 
 REM Kill the hidden launcher, the restart loop, and the agent process itself.
@@ -15,6 +15,6 @@ powershell -NoProfile -ExecutionPolicy Bypass -Command ^
 
 echo.
 echo  Zara is stopped. She will start again on your next login unless you also
-echo  run DISABLE_AUTOSTART.bat. To start her now, double-click START_ZARA.bat.
+echo  run DISABLE_AUTOSTART.bat. To start her now, double-click START.bat.
 echo.
 pause

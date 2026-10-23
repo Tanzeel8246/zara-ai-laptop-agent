@@ -1,11 +1,11 @@
 @echo off
 setlocal enabledelayedexpansion
 cd /d "%~dp0"
-title Start Zara
+title Start CodeHubb Assistant
 
 echo.
 echo  ============================================
-echo    Starting Zara + enabling auto-start
+echo    Starting CodeHubb Assistant + enabling auto-start
 echo  ============================================
 echo.
 
@@ -69,7 +69,7 @@ if errorlevel 1 (
   echo.
   echo  - Open Discord on your phone and DM the bot:  /help
   echo  - She will auto-start every time you log in.
-  echo  - To stop her:            double-click  STOP_ZARA.bat
+  echo  - To stop her:            double-click  STOP.bat
   echo  - To stop auto-starting:  double-click  DISABLE_AUTOSTART.bat
 )
 

@@ -1,317 +1,194 @@
-<div align="center">
+# CodeHubb Assistant
 
-# Zara — Control Your Windows Laptop From Your Phone
+**Your own AI assistant for your Windows PC — controlled from your phone.**
+By [MindCrafts AI](https://codehubb.com) / CodeHubb.
 
-**An AI agent that runs on your PC and takes orders from Discord — by text or by voice, in English or Urdu.**
+CodeHubb Assistant lives on your Windows computer and takes instructions from
+the chat apps already on your phone — **WhatsApp, Telegram or Discord** (pick
+one, or run several at once). Send a text or voice message from anywhere:
+*"open Chrome and download the invoice"*, *"find every PDF about taxes and send
+me the biggest"*, *"what's eating my RAM?"* — the assistant looks at your
+screen, plans the steps, uses its tools, and replies in the same chat with the
+result, in your language (English, Urdu and more).
 
-Send a message from anywhere. Zara takes a screenshot, runs the command, opens the app,
-fixes the Wi-Fi, sends the file — then replies with the result and a picture of your screen.
+You bring your own AI account (**BYOK** — Bring Your Own Key): a Claude
+subscription, or an API key from Anthropic, OpenAI, Google (Gemini), DeepSeek,
+or any OpenAI-compatible endpoint (OpenRouter, Groq, Mistral, xAI, Together,
+local Ollama / LM Studio). There is no AI bill from us — you pay your provider
+directly, or nothing extra at all if you use your Claude subscription.
 
-[![Python](https://img.shields.io/badge/Python-3.10%2B-3776AB?logo=python&logoColor=white)](https://python.org)
-[![Platform](https://img.shields.io/badge/Windows-10%20%7C%2011-0078D6?logo=windows&logoColor=white)](#requirements)
-[![Developed by Tanzeel](https://img.shields.io/badge/Developed%20by-Tanzeel-6C3EF5)](https://github.com/tanzeeldevAi)
-[![License](https://img.shields.io/badge/License-MIT-green.svg)](LICENSE)
-[![PRs Welcome](https://img.shields.io/badge/PRs-welcome-brightgreen.svg)](#contributing)
-
-</div>
-
----
-
-## What is this?
-
-Zara is a **remote laptop assistant**. She lives on your Windows PC and listens to a private
-Discord channel that only *you* can talk to.
-
-You control her from the **Discord mobile app** on your phone — the same app you already use.
-No extra app to install, nothing to buy, and it works from anywhere on mobile data or Wi-Fi.
-
-You are outside. Your laptop is at home. You open Discord on your phone and type (or say):
-
-> *"take a screenshot and tell me how the laptop is doing"*
-
-…and a few seconds later you get a picture of your screen and a spoken reply.
-
-She also understands **Urdu** — send a voice note in Urdu and she replies in an Urdu voice.
-
-She is not a chatbot with a fixed menu. She is an **AI agent** — a brain (Claude) plus **38 tools**
-(screenshot, shell, files, mouse, keyboard, apps, Wi-Fi). She decides which tools to use and
-chains them together on her own.
-
-```
-Discord app on your phone  ──►  Your laptop at home  ──►  AI brain  ──►  Tools
-            ▲                                                             │
-            └──────────  text · screenshots · voice reply  ◄─────────────┘
-```
-
-> **No port forwarding, no static IP, no VPN, no tunnel.** Your laptop connects *outward* to
-> Discord, so it works behind any home router or mobile network.
+> **Repository note:** this project is developed in the repository originally
+> created for the prototype, so the repo keeps its original name
+> (`zara-ai-laptop-agent`) for now. Clone URL:
+> `https://github.com/Tanzeel8246/zara-ai-laptop-agent`
 
 ---
 
-## What she can do
+## What it does
 
-| | |
-|---|---|
-| 📸 **See your screen** | Takes screenshots — and actually *reads* them to decide what to do next |
-| 💻 **Run anything** | Any PowerShell command, install software, check logs, run builds |
-| 📁 **Files** | Read, write, search, and send files to your phone |
-| 🖱️ **Use apps like a human** | Opens apps, focuses windows, clicks, types, pastes long text instantly |
-| 💬 **WhatsApp** | Opens a chat and sends a message for you |
-| 🎙️ **Voice in** | Send a voice note in **English or Urdu** — she understands it |
-| 🔊 **Voice out** | Replies in a natural female voice, in the same language you used |
-| 🩺 **System health** | CPU, RAM, disk, battery, biggest processes — and frees RAM when asked |
-| 📶 **Fixes its own Wi-Fi** | Detects the charger coming back after a power cut and reconnects by itself |
-| ♻️ **Never dies** | Auto-starts at login, a watchdog restarts her within 3 minutes if she stops |
+- **Three chat transports, all optional** — WhatsApp (QR pairing, unofficial
+  bridge — read [docs/WHATSAPP_DISCLAIMER.md](docs/WHATSAPP_DISCLAIMER.md)),
+  Telegram (official Bot API, inline confirmation buttons) and Discord
+  (official Bot API). They can run simultaneously and share one brain.
+- **Your choice of brain** — Claude subscription mode (Claude Code login, no
+  per-token API cost), or the API brain via LiteLLM: Anthropic, OpenAI,
+  Gemini, DeepSeek, or a custom OpenAI-compatible endpoint. Models that can't
+  see images are flagged honestly in the wizard — the assistant never fails
+  silently on a screenshot.
+- **49 tools** — screenshots and screen reading, PowerShell, files, apps and
+  windows, mouse/keyboard, web browsing (Playwright), memory, scheduling,
+  system health, Wi-Fi repair, voice replies, and more.
+- **Persistent memory** — conversations, facts and preferences live in a
+  local SQLite database (`.runtime/`), so the assistant remembers across
+  restarts. A task queue runs instructions one at a time (`/queue`,
+  `/cancel`), and a scheduler fires recurring jobs ("every morning at 9,
+  check the downloads folder") even if the PC was off at the scheduled time.
+- **Safety pipeline on every tool call** — allowlist-only access (only
+  *your* IDs can command it), risk classification, tap-to-confirm for
+  destructive actions, and an audit log of everything it did (viewable in
+  the desktop app).
+- **Desktop app** — a PySide6 system-tray app with a step-by-step setup
+  wizard, settings, audit-log viewer, one-click diagnostics for support,
+  and signed auto-updates.
+- **Commercial licensing** — Ed25519-signed license keys, a 14-day trial,
+  machine limits per plan, an optional activation server
+  ([license_server/](license_server/README.md)), and Lemon Squeezy / Paddle /
+  manual payment routes for sellers.
 
----
+## Quick start (end users)
 
-## Requirements
+1. Run the **installer** (`CodeHubbAssistant-Setup-<version>.exe`) — it is a
+   per-user install; no admin rights and no Python/Node setup needed.
+2. The **setup wizard** opens on first run:
+   - **License** — start the free trial or paste a purchased key.
+   - **Brain** — choose your Claude subscription or paste an API key
+     (keys go to the Windows keyring, never into plain-text files), then
+     press *Test* to verify with one tiny call.
+   - **Chats & messaging** — enable Discord, Telegram and/or WhatsApp
+     (WhatsApp shows a QR code to scan with your phone).
+   - **Behaviour & safety** — confirmations for risky actions (on by
+     default in release builds) and auto-start.
+3. Message your assistant from your phone and send `/help`.
 
-Before you start, make sure you have:
+Full walkthrough: **[docs/USER_GUIDE.md](docs/USER_GUIDE.md)**.
 
-- **Windows 10 or 11** — this does not run on Mac or Linux
-- **[Python 3.10+](https://python.org/downloads)** — while installing, tick **"Add Python to PATH"**
-- **A Claude subscription** (Claude Pro/Max) **or** an [Anthropic API key](https://console.anthropic.com)
-- **A Discord account** (free)
+## Developers — run from source
 
-> Zara can run on your **existing Claude subscription** through the Claude Code CLI — no
-> separate per-token API bill. An API key also works if you prefer.
-
----
-
-## Install — step by step
-
-It takes about **10 minutes**. You do not need to write any code.
-
-### Step 1 — Download
+Requirements: Windows 10/11, Python 3.10+, Node.js 18+ (only for the
+WhatsApp sidecar), Git.
 
 ```bash
-git clone https://github.com/tanzeeldevAi/zara-ai-laptop-agent.git
+git clone https://github.com/Tanzeel8246/zara-ai-laptop-agent
+cd zara-ai-laptop-agent
+
+python -m venv .venv
+.venv\Scripts\activate
+pip install -r requirements-gui.txt        # includes requirements.txt + PySide6
+playwright install chromium                # one-time, for the browser tools
+
+cd sidecar && npm install && cd ..         # WhatsApp bridge dependencies
+
+copy .env.example .env                     # then fill in your tokens/IDs
+python run_app.py                          # tray app + setup wizard
+python run.py                              # headless agent only (no GUI)
 ```
 
-No git? Click the green **Code** button above → **Download ZIP** → unzip it somewhere like `D:\zara`.
+- `run_app.py` starts the tray app; the agent itself runs as the same
+  executable relaunched with `--run-agent` in packaged builds.
+- Development builds (no `LICENSE_PUBLIC_KEY` set) run with licensing
+  disabled. See [docs/SELLER_GUIDE.md](docs/SELLER_GUIDE.md) for the release
+  build checklist.
 
-### Step 2 — Create your Discord bot
+## Configuration
 
-1. Open <https://discord.com/developers/applications>
-2. Click **New Application** → name it `Zara` → **Create**
-3. In the left menu click **Bot**
-4. Scroll down to **Privileged Gateway Intents** and turn **ON** → **MESSAGE CONTENT INTENT** → **Save Changes**
+Everything is configured through the wizard/settings window, which writes
+`.env` and stores secrets in the OS keyring. The main knobs (see
+`.env.example` for the annotated full list):
 
-   > ⚠️ **Do not skip this.** Without it, Zara appears online but cannot read a single message.
-   > This is the #1 reason people get stuck.
-
-5. Click **Reset Token** → **Copy**. This is your **bot token** — keep it private.
-
-### Step 3 — Make a server and invite her
-
-A Discord bot can only be messaged if you share a server with it.
-
-1. In the Discord app, click **+** on the left → **Create My Own** → **For me and my friends** → name it `Laptop`
-2. Back in the developer portal: **OAuth2** → **URL Generator**
-3. Under **Scopes**, tick **`bot`**
-4. Under **Bot Permissions**, tick: **Send Messages**, **Attach Files**, **Read Message History**, **Embed Links**
-5. Copy the generated URL at the bottom, open it in your browser, pick your **Laptop** server → **Authorize**
-
-### Step 4 — Get your Discord user ID
-
-This is the security lock: **only this ID can command your laptop.** Everyone else is refused.
-
-1. Discord → **Settings** → **Advanced** → turn on **Developer Mode**
-2. Right-click **your own name** in the bottom-left corner
-3. Click **Copy User ID**
-
-### Step 5 — Install
-
-Double-click **`install.bat`**
-
-It creates a virtual environment, installs everything, and opens `.env` in Notepad.
-Fill in the two lines:
-
-```ini
-DISCORD_BOT_TOKEN=paste_your_bot_token_here
-DISCORD_ALLOWED_USER_IDS=paste_your_user_id_here
-```
-
-Save the file and close it.
-
-### Step 6 — Start her
-
-Double-click **`START_ZARA.bat`**
-
-Now open Discord on your phone, go to your **Laptop** server, and send:
-
-```
-/help
-```
-
-Then try:
-
-```
-screenshot my screen
-```
-
-**That's it — you're running.** 🎉
-
----
-
-## Optional extras
-
-### Make voice replies fast (free)
-
-Voice notes are transcribed on your CPU by default, which takes ~13 seconds. With a free
-[Groq](https://console.groq.com) key it drops to about **1 second**, and Urdu accuracy improves a lot.
-
-1. Get a free key at <https://console.groq.com> → **API Keys** → **Create API Key**
-2. Double-click **`SET_GROQ_KEY.bat`** and paste it
-
-### Make her voice sound human
-
-By default Zara uses free Microsoft neural voices — clear, but a little flat. For a realistic
-voice with actual emotion (`[warmly]`, `[laughs]`, `[sighs]`), add an
-[ElevenLabs](https://elevenlabs.io) key:
-
-1. Double-click **`SET_VOICE_KEY.bat`** and paste your key
-2. Check what your plan supports:
-   ```bash
-   .venv\Scripts\python.exe check_voice.py
-   ```
-
-If ElevenLabs is unavailable or out of credits, she silently falls back to the free voices —
-nothing breaks.
-
-### Keep her running forever
-
-Double-click **`INSTALL_AUTOSTART.bat`** → click **Yes** on the Windows prompt.
-
-From then on she starts at login, restarts herself within 3 minutes if she ever stops, and
-reconnects on her own when the internet comes back — then messages you *"back online"*.
-
-For surviving a full power cut while you're away, read **[AUTOSTART-NOTES.txt](AUTOSTART-NOTES.txt)**.
-
----
-
-## Commands
-
-| Command | What it does |
+| Setting | Meaning |
 |---|---|
-| `/help` | Show help |
-| `/new` | Forget the conversation and start fresh |
-| `/stop` | Cancel whatever she is doing |
-| `/shot` | Instant screenshot |
-| `/status` | Instant system health |
-| `/voice on` · `off` · `auto` | Control voice replies |
+| `TRANSPORTS` | `discord,telegram,whatsapp` — any subset |
+| `DISCORD_BOT_TOKEN`, `DISCORD_ALLOWED_USER_IDS` | Discord bot + who may command it |
+| `TELEGRAM_BOT_TOKEN`, `TELEGRAM_ALLOWED_USER_IDS` | Telegram bot (via @BotFather) + allowlist |
+| `WHATSAPP_ALLOWED_NUMBERS` | WhatsApp allowlist (QR pairing, no token) |
+| `BRAIN` | `subscription` · `api` · `auto` |
+| `API_PROVIDER` | `anthropic` · `openai` · `gemini` · `deepseek` · `custom` |
+| `CONFIRM_RISKY` | Ask before destructive actions (release default: on) |
+| `ASSISTANT_NAME` | Your assistant's persona name — name it anything |
+| `LICENSE_PUBLIC_KEY`, `LICENSE_SERVER_URL` | Licensing (release builds) |
+| `UPDATE_FEED_URL` | Auto-update feed (release builds) |
 
-Everything else is just plain English — type it or send a voice note from the Discord app:
+## Safety model (summary)
 
-> *"open chrome and go to gmail, then screenshot it"*
-> *"what's eating my RAM? close the worst one"*
-> *"find every invoice PDF in Documents from this year and send me the biggest"*
-> *"send a WhatsApp message to Ali saying I'll be there in 10 minutes"*
-> *"pull the latest changes in D:\my-project, run the tests, show me any failures"*
-> *"is my internet working? if not, fix it"*
+This software gives an AI real control of a PC, so the design is strict:
 
-Urdu works exactly the same way — she replies in whichever language you used.
+- **Allowlists everywhere** — messages from anyone but the owner's IDs are
+  ignored on every transport.
+- **Confirmations** — risky tool calls (delete, shutdown, registry, sending
+  messages, browser clicks…) pause for the owner's approval; on Telegram
+  these are real inline buttons.
+- **Audit log** — every tool call is appended to `.runtime/audit.jsonl`
+  and viewable from the tray app.
+- **Content is data, not orders** — instructions planted in web pages,
+  documents or chats are not obeyed.
+- **Browser SSRF guard** — the browser tools refuse local/private network
+  addresses.
+- **Secrets in the keyring** — API keys and license keys are stored via the
+  OS keyring, not in `.env`.
 
----
+Details: **[docs/SECURITY.md](docs/SECURITY.md)** ·
+Privacy: **[docs/PRIVACY.md](docs/PRIVACY.md)** ·
+Terms: **[docs/EULA.md](docs/EULA.md)**
 
-## Security
+## Project layout
 
-This tool gives an AI real control of your computer, so the design is deliberately strict:
+```
+agent/            the agent core
+  transport/      discord / telegram / whatsapp transports
+  brain/          subscription (SDK) + API (LiteLLM) brains, provider registry
+  tools/          the 49 tools (screen, shell, files, browser, memory, …)
+  licensing.py    Ed25519 license keys, trial, activation client
+  safety.py       classify → confirm → audit pipeline
+  queue.py        persistent task queue          store.py   SQLite store
+  scheduler.py    recurring jobs                 updater.py auto-update
+desktop/          PySide6 tray app, setup wizard, settings, audit viewer
+license_server/   seller-hosted activation + payment-webhook server (FastAPI)
+sidecar/          WhatsApp bridge (Node.js, Baileys)
+packaging/        PyInstaller spec, Inno Setup script, build_windows.ps1
+tools/            seller tools (issue/revoke license keys)
+docs/             user guide, seller guide, EULA, privacy, security
+website/          standalone product page (single HTML file)
+```
 
-- **Only your Discord user ID** can issue commands. Everyone else is refused and logged — even
-  people inside your own server.
-- **Your `.env` file holds the keys to your machine.** Never commit it, never share it, never open
-  it while screen-sharing. It is already in `.gitignore`.
-- **Everything she reads is treated as data, not orders.** A web page, document or chat message
-  that says *"delete everything"* will not be obeyed — she shows it to you instead.
-- **She will not type your passwords or card numbers** into forms.
-- Set `CONFIRM_RISKY=true` in `.env` to make destructive actions (delete, shutdown, registry,
-  format) ask you for a **Run it / Cancel** confirmation first.
+## Development & testing
 
-> Use this on a computer you own. You are responsible for what you ask it to do.
+```bash
+pip install -r requirements-dev.txt
+python -m pytest          # full suite (GUI tests run headless/offscreen)
+```
 
----
+The version lives in `agent/version.py` (single source of truth); the
+packaging files are kept in step by `tests/test_version.py`.
 
-## Troubleshooting
+## Status & limitations (honest list)
 
-<details>
-<summary><b>She shows online but never replies</b></summary>
-
-**MESSAGE CONTENT INTENT** is off. Go back to Step 2.4. This causes 9 out of 10 problems.
-</details>
-
-<details>
-<summary><b>"You are not authorised to control this machine"</b></summary>
-
-Your `DISCORD_ALLOWED_USER_IDS` is wrong. Redo Step 4 — make sure you copied *your* user ID,
-not the bot's application ID.
-</details>
-
-<details>
-<summary><b>Nothing happens when I run install.bat</b></summary>
-
-Python isn't installed, or "Add Python to PATH" wasn't ticked during install. Reinstall Python
-and tick that box.
-</details>
-
-<details>
-<summary><b>I can't find the bot to message it</b></summary>
-
-You haven't invited it to a server yet — do Step 3. A bot can't be DMed unless you share a server.
-</details>
-
-<details>
-<summary><b>Voice notes are ignored</b></summary>
-
-The first voice note downloads a speech model (~0.5 GB) once, so it's slow the first time.
-After that it's fast. Add a Groq key to make it about 1 second.
-</details>
-
-<details>
-<summary><b>She stops in the middle of a long job</b></summary>
-
-Raise `MAX_ITERATIONS` in `.env` (default 400). Every click, wait and screenshot counts as one
-step, so very long jobs can hit the ceiling. She also auto-continues 3 times before pausing.
-</details>
-
----
-
-## How it works
-
-- **Discord** is the transport — no open ports, no port forwarding, no tunnel, no static IP.
-  Your laptop connects outward, so it works behind any router.
-- **Claude** is the brain, via the [Claude Agent SDK](https://docs.claude.com/en/api/agent-sdk/overview),
-  running on your existing subscription.
-- **Tools** are small Python functions exposed to the model as an in-process MCP server.
-  The model picks which to call.
-- **Speech to text**: [faster-whisper](https://github.com/SYSTRAN/faster-whisper) locally, or Groq's
-  `whisper-large-v3` in the cloud.
-- **Text to speech**: [edge-tts](https://github.com/rany2/edge-tts) free, or ElevenLabs for
-  emotional voices.
-
-Want to add your own ability? Drop a function in `agent/tools/`, decorate it with `@tool(...)`,
-and Zara can use it immediately.
-
----
-
-## Contributing
-
-Issues and pull requests are welcome — especially new tools, better Urdu voice support, and
-Linux/Mac ports.
+- **Windows only.** macOS/Linux are not supported in v1.0.
+- **First live checks happen on a real Windows machine:** the WhatsApp QR
+  pairing and the full installer build (`packaging/build_windows.ps1`) are
+  exercised there — the sandbox used for development cannot reach WhatsApp's
+  servers or run a Windows build.
+- **Paddle webhooks** are implemented from Paddle's public docs; the four
+  confirmation items in `license_server/paddle.py` must be checked once
+  against a live (sandbox) Paddle dashboard before relying on them.
+  Lemon Squeezy is the verified-first route.
+- **Bundle size:** the installer (Python runtime + PySide6 + a staged
+  Chromium) is a few hundred MB. A local speech model (~0.5 GB) downloads
+  on first voice use unless a Groq key is configured.
+- **WhatsApp Route A is unofficial** and can get a number restricted —
+  use a dedicated number. An official Cloud API route is planned as a
+  future Pro feature.
 
 ## License
 
-[MIT](LICENSE) — free to use, change and share. If it helps you, a ⭐ on the repo is appreciated.
-
----
-
-<div align="center">
-
-**Built by [@tanzeeldevAi](https://github.com/tanzeeldevAi)**
-
-*AI agent · personal AI assistant · remote PC control · control laptop from phone · Discord bot
-Python · Windows automation · Claude AI agent · computer use agent · voice assistant · Urdu voice
-assistant · speech to text · text to speech · LLM agent · self-hosted AI assistant*
-
-</div>
+Proprietary — © MindCrafts AI / CodeHubb, all rights reserved.
+See [LICENSE](LICENSE) and [docs/EULA.md](docs/EULA.md).

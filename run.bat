@@ -1,7 +1,7 @@
 @echo off
 setlocal
 cd /d "%~dp0"
-title Zara
+title CodeHubb Assistant
 
 if not exist ".venv\Scripts\python.exe" (
   echo  Not installed yet - run install.bat first.

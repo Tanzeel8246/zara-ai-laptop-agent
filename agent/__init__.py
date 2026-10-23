@@ -1,3 +1,7 @@
-"""LapPilot - remote laptop agent driven from Discord."""
+"""CodeHubb Assistant - remote laptop agent driven from your phone."""
 
-__version__ = "1.0.0"
+# The version lives in agent/version.py (single source of truth, Phase 5);
+# it is re-exported here so `from agent import __version__` keeps working.
+from .version import __version__
+
+__all__ = ["__version__"]

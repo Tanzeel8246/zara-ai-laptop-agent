@@ -51,7 +51,7 @@ def _prune(keep=60):
         },
         "show": {
             "type": "boolean",
-            "description": "true = also send this image to the user in Discord. Default false.",
+            "description": "true = also send this image to the user in the chat. Default false.",
         },
         "note": {"type": "string", "description": "Short caption, only used when show=true."},
     },
@@ -102,7 +102,7 @@ def list_monitors():
 
 @tool(
     "send_screenshot_file",
-    "Send an existing image file from the laptop to the user in Discord.",
+    "Send an existing image file from the laptop to the user in the chat.",
     {"path": {"type": "string", "description": "Full path to the image."}},
     required=["path"],
 )
@@ -110,4 +110,4 @@ def send_screenshot_file(path):
     p = Path(path)
     if not p.exists():
         return {"text": f"No such file: {p}"}
-    return {"text": f"Sent {p.name} to Discord.", "files": [p]}
+    return {"text": f"Sent {p.name} to the chat.", "files": [p]}

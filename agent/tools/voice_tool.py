@@ -1,4 +1,4 @@
-"""The `speak` tool - Zara's proper way to reply out loud."""
+"""The `speak` tool - the assistant's proper way to reply out loud."""
 
 from . import tool
 from ..voice import synthesize_sync
@@ -6,7 +6,7 @@ from ..voice import synthesize_sync
 
 @tool(
     "speak",
-    "Send the owner a spoken VOICE message (an audio note that plays in Discord). Use this "
+    "Send the owner a spoken VOICE message (an audio note that plays in the chat app). Use this "
     "whenever they ask you to answer in voice - 'voice msg', 'in voice', 'bolo', 'awaz mein "
     "batao', 'introduce yourself in voice' - or whenever a voice reply clearly fits. Put the "
     "EXACT words to say in `text`, in the owner's language. This is the ONLY correct way to "
