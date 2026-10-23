@@ -96,10 +96,19 @@ def run():
         print(f"\n  Warning: {warning}")
 
     from .brain import make_brain
+    from .scheduler import Scheduler
     from .session import AgentSession
 
     brain, brain_label = make_brain()
     session = AgentSession(brain, brain_label)
+
+    # Phase 3: the task-queue worker (recovers any tasks a dead process
+    # left 'running') and the scheduler thread (due schedules become
+    # queued tasks). Both are daemon threads; transports are unaffected.
+    session.queue.start()
+    scheduler = Scheduler(session.store, session.queue)
+    scheduler.start()
+
     transports = _build_transports(session)
     if not transports:
         print("\n  No transport could start. See the errors above.\n")
