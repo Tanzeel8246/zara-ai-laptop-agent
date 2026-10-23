@@ -1,4 +1,4 @@
-"""Composition root: wire transport + brain + session together and run.
+"""Composition root: wire transports + brain + session together and run.
 
 Phase 0 split the original monolith into seams:
     agent.transport   how instructions arrive (Discord is the reference one)
@@ -6,18 +6,26 @@ Phase 0 split the original monolith into seams:
     agent.safety      the shared pipeline every tool call passes through
     agent.session     what happens to one instruction, transport-neutral
 
+Phase 1: several transports can run at once (TRANSPORTS in .env — discord,
+telegram, whatsapp). They share ONE brain, ONE safety pipeline and ONE
+session manager, and each runs in its own thread so one transport failing
+(bad token, missing Node.js, a dropped network) never takes the others down.
+
 This module keeps only startup concerns: single-instance lock, setup
 validation, the wait-for-network gate, and construction.
 """
 
 import sys
+import threading
+import time
+import traceback
 
 from . import netrecover
 from .config import CONFIG, validate, validate_warnings
 
 
 def _single_instance():
-    """Windows named mutex so only ONE copy ever runs (two would fight over the transport)."""
+    """Windows named mutex so only ONE copy ever runs (two would fight over the transports)."""
     global _INSTANCE_GUARD
     try:
         import ctypes
@@ -31,6 +39,44 @@ def _single_instance():
 
 
 _INSTANCE_GUARD = None
+
+
+def _build_transports(session):
+    """Construct every enabled transport. One failing to construct is logged
+    and skipped — the rest still start."""
+    builders = {}
+    if "discord" in CONFIG.transports:
+        from .transport.discord_transport import DiscordTransport
+
+        builders["discord"] = DiscordTransport
+    if "telegram" in CONFIG.transports:
+        from .transport.telegram_transport import TelegramTransport
+
+        builders["telegram"] = TelegramTransport
+    if "whatsapp" in CONFIG.transports:
+        from .transport.whatsapp_transport import WhatsAppTransport
+
+        builders["whatsapp"] = WhatsAppTransport
+
+    transports = []
+    for name, builder in builders.items():
+        try:
+            transports.append(builder(session))
+        except Exception as exc:  # noqa: BLE001 - independence between transports
+            print(f"\n  [{name}] could not start: {type(exc).__name__}: {exc}\n", file=sys.stderr)
+    return transports
+
+
+def _run_transport(transport):
+    try:
+        transport.run()
+    except SystemExit as exc:
+        # A transport that exits itself (e.g. Discord rejecting its token)
+        # ends only its own thread; the others keep serving.
+        print(f"\n  [{transport.name}] transport stopped (exit code {exc.code}).\n", file=sys.stderr)
+    except Exception:  # noqa: BLE001
+        traceback.print_exc()
+        print(f"\n  [{transport.name}] transport crashed; the others keep running.\n", file=sys.stderr)
 
 
 def run():
@@ -51,15 +97,34 @@ def run():
 
     from .brain import make_brain
     from .session import AgentSession
-    from .transport.discord_transport import DiscordTransport
 
     brain, brain_label = make_brain()
     session = AgentSession(brain, brain_label)
-    transport = DiscordTransport(session)
+    transports = _build_transports(session)
+    if not transports:
+        print("\n  No transport could start. See the errors above.\n")
+        sys.exit(1)
 
     # Block until online, actively rejoining Wi-Fi rather than just waiting.
     netrecover.wait_until_online()
-    transport.run()
+
+    threads = []
+    for transport in transports:
+        thread = threading.Thread(
+            target=_run_transport, args=(transport,), name=f"transport-{transport.name}", daemon=True
+        )
+        thread.start()
+        threads.append(thread)
+
+    try:
+        while any(t.is_alive() for t in threads):
+            for t in threads:
+                t.join(timeout=0.5)
+    except KeyboardInterrupt:
+        print("\n  Shutting down.")
+        return
+    print("\n  All transports have stopped.\n")
+    sys.exit(1)
 
 
 if __name__ == "__main__":
