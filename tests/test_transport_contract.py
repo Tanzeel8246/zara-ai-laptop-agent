@@ -55,7 +55,7 @@ async def test_plain_instruction_round_trip(monkeypatch):
         # The system prompt and the tools must reach the provider call.
         assert kwargs["messages"][0]["role"] == "system"
         assert kwargs["model"] == "anthropic/claude-opus-5"
-        assert len(kwargs["tools"]) == 38
+        assert len(kwargs["tools"]) == 49   # 38 original + 11 Phase 3 tools
         return completion(content="All done.")
 
     monkeypatch.setattr("agent.brain.api_brain.litellm.acompletion", fake_acompletion)

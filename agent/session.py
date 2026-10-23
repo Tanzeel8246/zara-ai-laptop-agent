@@ -3,8 +3,15 @@
 Before Phase 0 this flow lived inline in the Discord client's on_message.
 It now sits behind the Transport seam: a transport gates the sender against
 the allowlist, packages the message as an IncomingMessage, and hands it here.
-Commands, voice-note handling, job bookkeeping (/stop) and the spoken-reply
-logic are unchanged behaviour, just no longer Discord-shaped.
+
+Phase 3: an accepted instruction no longer runs inline (with a flat
+"still busy" rejection when a job was already running). It is submitted to
+the unified task queue (agent/queue.py) — durable, global FIFO across all
+sessions and transports — and the queue's worker delivers the brain's
+replies back through this session's channel. When the queue's worker
+thread was never started (tests, embedding), the session executes the task
+inline on the caller's loop instead, which behaves exactly as before.
+Commands (/help, /new, /stop, /queue, /cancel, ...) are never queued.
 """
 
 import asyncio
@@ -12,6 +19,8 @@ import contextlib
 
 from . import voice
 from .config import CONFIG
+from .queue import LoopBoundChannel, TaskQueue
+from .store import get_store
 from .transport import session_key_of
 
 HELP = """**{name} - your laptop, from your phone**
@@ -29,6 +38,8 @@ I understand English and Urdu, and I'll reply by voice when you talk to me by vo
 **Commands**
 `/new` - forget this conversation and start fresh
 `/stop` - cancel whatever I'm doing right now
+`/queue` - see what's queued up
+`/cancel <id>` - drop a queued task (id from /queue)
 `/shot` - instant screenshot, no thinking
 `/status` - instant system health
 `/voice on` / `/voice off` / `/voice auto` - control voice replies
@@ -36,30 +47,44 @@ I understand English and Urdu, and I'll reply by voice when you talk to me by vo
 
 
 class AgentSession:
-    def __init__(self, brain, brain_label=""):
+    def __init__(self, brain, brain_label="", store=None, queue=None):
         self.brain = brain
         self.brain_label = brain_label
-        self.jobs = {}          # channel_id -> asyncio.Task running brain.handle
-        self.voice_mode = {}    # channel_id -> per-channel voice override
+        self.store = store or get_store()
+        self.queue = queue or TaskQueue(
+            self.store, self._run_task, channel_resolver=self._resolve_channel
+        )
+        self.voice_mode = {}    # session_key -> per-channel voice override
+        self._channels = {}     # session_key -> latest LoopBoundChannel seen
 
     @property
     def model_label(self):
         return getattr(self.brain, "model_label", "")
+
+    def _resolve_channel(self, session_key):
+        """Latest channel seen for a session (queue resolver for tasks that
+        arrive without a live channel: scheduled and crash-recovered ones)."""
+        return self._channels.get(str(session_key))
 
     async def handle_message(self, msg):
         chan = msg.channel
         key = session_key_of(chan)
         text = (msg.text or "").strip()
 
+        # Bind the channel to this loop and remember it, so queued and
+        # proactive work can deliver back to this chat later.
+        bound = LoopBoundChannel(chan, asyncio.get_running_loop())
+        self._channels[str(key)] = bound
+
         if text.startswith("/"):
-            if await self._command(text, key, chan):
+            if await self._command(text, key, bound):
                 return
 
         came_by_voice = False
         if msg.audio_paths or msg.audio_failed:
             heard, lang = "", ""
             if msg.audio_paths:
-                heard, lang = await self._listen(msg.audio_paths[0], chan)
+                heard, lang = await self._listen(msg.audio_paths[0], bound)
             if heard:
                 # tell the model it arrived as speech, so it replies by voice in the same language
                 spoken_lang = "Urdu" if str(lang).startswith("ur") else (
@@ -71,9 +96,9 @@ class AgentSession:
                     f"Reply using the `speak` tool in the same language, plus a short text line.]"
                 )
                 came_by_voice = True
-                await chan.send_text(f"-# 🎙️ heard: {heard[:300]}")
+                await bound.send_text(f"-# 🎙️ heard: {heard[:300]}")
             elif not text:
-                await chan.send_text(
+                await bound.send_text(
                     "I got your voice note but couldn't make out any words. "
                     "Try speaking a bit longer, or type it."
                 )
@@ -88,18 +113,39 @@ class AgentSession:
 
         voice.SPOKE_CHANNELS.discard(key)   # fresh turn: no voice sent yet
 
+        task_id, ahead = self.queue.submit(
+            key, text, chan=bound, came_by_voice=came_by_voice
+        )
+        if self.queue.is_running:
+            if ahead > 0:
+                await bound.send_text(
+                    f"⏳ Queued as task #{task_id} — position {ahead + 1} in line. "
+                    f"I'll start it as soon as the work ahead of it finishes. "
+                    f"`/queue` shows the line; `/cancel {task_id}` drops it."
+                )
+            return
+
+        # Worker not started (tests / embedding): run it here, as before.
+        try:
+            await self.queue.run_inline(task_id)
+        except asyncio.CancelledError:
+            pass
+
+    async def _run_task(self, row, chan, live):
+        """Execute one queued task: the brain turn + the spoken reply.
+
+        Runs on the queue worker's loop in production; `chan` is a
+        LoopBoundChannel, so every send is marshalled back to the
+        transport's own loop.
+        """
+        key = row["session_key"]
+        came_by_voice = live.came_by_voice if live is not None else False
+
         # The original showed Discord's "typing…" for the whole job; channels
         # that support it expose typing(), the rest skip it.
         typing_cm = chan.typing() if hasattr(chan, "typing") else contextlib.nullcontext()
         async with typing_cm:
-            job = asyncio.create_task(self.brain.handle(key, text, chan))
-            self.jobs[key] = job
-            try:
-                await job
-            except asyncio.CancelledError:
-                pass
-            finally:
-                self.jobs.pop(key, None)
+            await self.brain.handle(key, row["prompt"], chan)
 
         await self._maybe_speak(key, came_by_voice, chan)
 
@@ -167,12 +213,55 @@ class AgentSession:
             return True
 
         if command == "/stop":
-            job = self.jobs.get(key)
-            if job and not job.done():
-                job.cancel()
+            running = self.queue.running_task_for(key)
+            if running is not None:
+                self.queue.cancel(running["id"])
                 await chan.send_text("Stopping.")
             else:
                 await chan.send_text("Nothing running.")
+            return True
+
+        if command == "/queue":
+            rows = self.store.list_tasks(
+                session_key=str(key), statuses=("queued", "running"), limit=20
+            )
+            if not rows:
+                await chan.send_text("Nothing queued — I'm all caught up.")
+                return True
+            lines = []
+            for row in rows:
+                prompt = " ".join(str(row["prompt"]).split())[:70]
+                if row["status"] == "running":
+                    lines.append(f"#{row['id']} ▶️ running — {prompt}")
+                else:
+                    lines.append(
+                        f"#{row['id']} ⏳ position {self.queue.position(row['id'])} — {prompt}"
+                    )
+            await chan.send_text("In line:\n" + "\n".join(lines))
+            return True
+
+        if command == "/cancel":
+            parts = text.split()
+            task_id = None
+            if len(parts) > 1:
+                try:
+                    task_id = int(parts[1].lstrip("#"))
+                except ValueError:
+                    task_id = None
+            if task_id is None:
+                await chan.send_text("Use `/cancel <id>` — the id is shown by `/queue`.")
+                return True
+            row = self.store.get_task(task_id)
+            if row is None or str(row["session_key"]) != str(key):
+                await chan.send_text(f"Task #{task_id} isn't in this chat.")
+                return True
+            outcome = self.queue.cancel(task_id)
+            if outcome == "cancelled":
+                await chan.send_text(f"Task #{task_id} cancelled — it won't run.")
+            elif outcome == "cancelling":
+                await chan.send_text(f"Cancelling task #{task_id}…")
+            else:
+                await chan.send_text(f"Task #{task_id} already finished.")
             return True
 
         if command == "/shot":

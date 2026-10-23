@@ -14,6 +14,10 @@ pyperclip>=1.8.2
 edge-tts>=6.1.12
 faster-whisper>=1.0.3
 claude-agent-sdk>=0.1.0
+# Browser tool (Phase 3): the Playwright library. The Chromium binary is a
+# separate one-time setup step — run `playwright install chromium` once
+# after pip install (bundled by the installer in Phase 5).
+playwright>=1.40.0
 
 # Desktop shell (tray + setup wizard, Phase 2): PySide6 and qrcode live in
 # requirements-gui.txt so a headless agent install stays lean.

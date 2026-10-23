@@ -183,6 +183,17 @@ class Config:
     voice_rate = os.getenv("VOICE_RATE", "+8%").strip() or "+0%"
     voice_pitch = os.getenv("VOICE_PITCH", "+2Hz").strip() or "+0Hz"
 
+    # ---- licensing (Phase 4) ----
+    # The seller's Ed25519 PUBLIC key (base64 or PEM). This is a build-time
+    # switch, set in the release build's .env: when it is EMPTY the build is
+    # a development build and licensing is disabled entirely (unrestricted).
+    # When set, trial/activation enforcement turns on. It is a public key —
+    # not a secret — so it lives in plain config, never the keyring.
+    license_public_key = os.getenv("LICENSE_PUBLIC_KEY", "").strip()
+    # Optional activation/validation server (license_server/). Blank =
+    # fully offline licensing: signed keys + grace rules only.
+    license_server_url = os.getenv("LICENSE_SERVER_URL", "").strip().rstrip("/")
+
     # ---- browser tool (Phase 3, Playwright) ----
     # Headless by default; set BROWSER_HEADLESS=false to watch it work.
     browser_headless = _bool("BROWSER_HEADLESS", "true")

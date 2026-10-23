@@ -1,11 +1,18 @@
-"""(a) The tool registry must load exactly the original 38 tools."""
+"""(a) The tool registry: the original 38 tools + Phase 3 additions.
+
+Phase 3 (Tier-1 capabilities) added 11: persistent memory
+(remember_fact / recall_facts / forget_fact), the Playwright browser
+(browser_open / browser_snapshot / browser_click / browser_type /
+browser_close) and the scheduler (schedule_task / list_schedules /
+cancel_schedule) — 49 in total.
+"""
 
 from agent.tools import load_all
 
-EXPECTED_COUNT = 38
+EXPECTED_COUNT = 49
 
 
-def test_exactly_38_tools():
+def test_exact_tool_count():
     schemas, handlers = load_all()
     assert len(schemas) == EXPECTED_COUNT
     assert len(handlers) == EXPECTED_COUNT
@@ -30,4 +37,15 @@ def test_schemas_well_formed():
 def test_key_tools_present():
     _, handlers = load_all()
     for name in ("screenshot", "run_powershell", "speak", "system_status", "whatsapp_send"):
+        assert name in handlers
+
+
+def test_phase3_tools_present():
+    _, handlers = load_all()
+    for name in (
+        "remember_fact", "recall_facts", "forget_fact",
+        "browser_open", "browser_snapshot", "browser_click", "browser_type",
+        "browser_close",
+        "schedule_task", "list_schedules", "cancel_schedule",
+    ):
         assert name in handlers
