@@ -26,6 +26,7 @@ import litellm
 from ..config import CONFIG
 from ..prompts import SYSTEM_PROMPT
 from ..safety import ToolExecutor
+from ..store import SqliteHistoryStore, get_store
 from ..tools import load_all
 from .providers import NO_VISION_NOTICE, build_model_string, get_provider, model_supports_vision
 
@@ -49,15 +50,61 @@ def _encode_image(path):
     return base64.standard_b64encode(Path(path).read_bytes()).decode("ascii")
 
 
+def _sanitize_loaded(messages):
+    """Make a history restored from the store safe to send to a provider.
+
+    A turn interrupted mid-flight (cancel, crash) can leave a dangling
+    assistant tool-call group — an assistant message whose tool results
+    never landed — which strict providers reject outright. Drop incomplete
+    groups and orphan tool results, and apply _trim's front rule so the
+    sequence starts with a plain user message.
+    """
+    while messages and not (
+        messages[0].get("role") == "user" and isinstance(messages[0].get("content"), str)
+    ):
+        messages.pop(0)
+
+    cleaned = []
+    index = 0
+    while index < len(messages):
+        message = messages[index]
+        calls = message.get("tool_calls") if message.get("role") == "assistant" else None
+        if calls:
+            ids = [call.get("id") for call in calls]
+            following = messages[index + 1 : index + 1 + len(ids)]
+            complete = len(following) == len(ids) and all(
+                part.get("role") == "tool" and part.get("tool_call_id") == call_id
+                for part, call_id in zip(following, ids)
+            )
+            if complete:
+                cleaned.append(message)
+                cleaned.extend(following)
+                index += 1 + len(ids)
+            else:
+                index += 1
+                while index < len(messages) and messages[index].get("role") == "tool":
+                    index += 1
+            continue
+        if message.get("role") == "tool":
+            index += 1          # orphan tool result: its call was dropped
+            continue
+        cleaned.append(message)
+        index += 1
+    return cleaned
+
+
 class ApiBrain:
     """Same surface as the original brain.Brain, backed by LiteLLM."""
 
-    def __init__(self, executor=None):
+    def __init__(self, executor=None, history_store=None):
         self.provider = get_provider(CONFIG.api_provider)
         self.model_name = CONFIG.provider_model
         self.model_string = build_model_string(self.provider, self.model_name)
         self.supports_vision = model_supports_vision(self.provider, self.model_name)
         self.executor = executor or ToolExecutor(brain_label=f"api:{self.provider.id}", announce=True)
+        # Phase 3: conversation history is backed by SQLite — the in-memory
+        # list stays the working copy, the store is what survives a restart.
+        self.history_store = history_store or SqliteHistoryStore(get_store())
         self.sessions = {}
         self.busy = set()
 
@@ -67,9 +114,24 @@ class ApiBrain:
 
     def reset(self, key):
         self.sessions.pop(key, None)
+        self.history_store.clear(key)
 
     def _history(self, key):
-        return self.sessions.setdefault(key, [])
+        if key not in self.sessions:
+            self.sessions[key] = _sanitize_loaded(self.history_store.load(key))
+        return self.sessions[key]
+
+    def _persist(self, key, message):
+        """Mirror one message into the durable history store.
+
+        The screenshot-carrying user message (a content LIST with base64
+        image data) is deliberately not persisted: it would bloat the
+        database enormously, and dropping a standalone user message keeps
+        the restored sequence valid.
+        """
+        if isinstance(message.get("content"), list):
+            return
+        self.history_store.append(key, message)
 
     def _trim(self, messages):
         limit = max(4, CONFIG.history_turns)
@@ -121,7 +183,9 @@ class ApiBrain:
 
     async def _run(self, key, user_text, chan):
         messages = self._history(key)
-        messages.append({"role": "user", "content": user_text})
+        user_message = {"role": "user", "content": user_text}
+        messages.append(user_message)
+        self._persist(key, user_message)
         self._trim(messages)
 
         for _step in range(CONFIG.max_iterations):
@@ -153,6 +217,7 @@ class ApiBrain:
                     for c in calls
                 ]
             messages.append(assistant_msg)
+            self._persist(key, assistant_msg)
 
             if text.strip():
                 await chan.send_text(text)
@@ -174,9 +239,11 @@ class ApiBrain:
                     call["name"], args, chan, show_images_to_user=True
                 )
                 result_text = ("ERROR: " if outcome.is_error else "") + outcome.text
-                messages.append(
-                    {"role": "tool", "tool_call_id": call["id"], "content": result_text}
-                )
+                tool_message = {
+                    "role": "tool", "tool_call_id": call["id"], "content": result_text,
+                }
+                messages.append(tool_message)
+                self._persist(key, tool_message)
 
                 if self.supports_vision:
                     for image_path in outcome.images:
