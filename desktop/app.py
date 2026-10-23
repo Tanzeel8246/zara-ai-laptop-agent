@@ -163,10 +163,38 @@ class TrayController(QWidget):
             "error": f"Error — agent exited with code {self._last_exit_code}",
         }[state]
         name = self.settings.assistant_name or "Assistant"
+        suffix = self._license_suffix()
+        if suffix:
+            label = f"{label} · {suffix}"
         self.status_action.setText(f"{name}: {label}")
         self.tray.setIcon(self._icon_for(state))
         self.start_action.setEnabled(state != "running")
         self.stop_action.setEnabled(state == "running")
+
+    _license_cache = ("", 0.0)
+
+    def _license_suffix(self):
+        """'Trial (9 days left)' / 'Activation required' — release builds
+        only; development builds append nothing. Cached: the tray refreshes
+        every second, license state does not change that fast."""
+        import time
+
+        text, stamp = self._license_cache
+        if time.monotonic() - stamp < 30:
+            return text
+        text = ""
+        try:
+            from agent import licensing
+
+            if licensing.enforcement_enabled():
+                status = licensing.get_manager().status()
+                text = licensing.status_line(status)
+                if status.state in ("trial_expired", "expired", "revoked", "invalid"):
+                    text = "Activation required"
+        except Exception:  # noqa: BLE001 - the tray must never die on this
+            text = ""
+        self._license_cache = (text, time.monotonic())
+        return text
 
     def _icon_for(self, state):
         filename = {

@@ -10,12 +10,13 @@ from PySide6.QtWidgets import (
 )
 
 from desktop.fields import BehaviourFields, BrainFields, GeneralFields, TransportsFields
+from desktop.license_panel import LicensePanel
 from desktop.settings_model import Settings
 
 
 class SettingsDialog(QDialog):
     def __init__(self, settings=None, parent=None, *, completion=None,
-                 pairing_factory=None, env_path=None):
+                 pairing_factory=None, env_path=None, license_client=None):
         super().__init__(parent)
         self.settings = settings or Settings.load(env_path)
         self.env_path = env_path
@@ -40,6 +41,11 @@ class SettingsDialog(QDialog):
 
         self.transports_fields = TransportsFields(pairing_factory=pairing_factory)
         tabs.addTab(self.transports_fields, "Chats")
+
+        # Phase 4: the same license panel the wizard uses. It acts
+        # immediately (keyring + server), independent of Save/Cancel.
+        self.license_panel = LicensePanel(client=license_client)
+        tabs.addTab(self.license_panel, "License")
 
         buttons = QDialogButtonBox(
             QDialogButtonBox.StandardButton.Save | QDialogButtonBox.StandardButton.Cancel

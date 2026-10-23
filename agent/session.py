@@ -17,7 +17,7 @@ Commands (/help, /new, /stop, /queue, /cancel, ...) are never queued.
 import asyncio
 import contextlib
 
-from . import voice
+from . import licensing, voice
 from .config import CONFIG
 from .queue import LoopBoundChannel, TaskQueue
 from .store import get_store
@@ -42,15 +42,22 @@ I understand English and Urdu, and I'll reply by voice when you talk to me by vo
 `/cancel <id>` - drop a queued task (id from /queue)
 `/shot` - instant screenshot, no thinking
 `/status` - instant system health
+`/license` - your license / trial status
 `/voice on` / `/voice off` / `/voice auto` - control voice replies
 `/help` - this message"""
 
 
 class AgentSession:
-    def __init__(self, brain, brain_label="", store=None, queue=None):
+    def __init__(self, brain, brain_label="", store=None, queue=None,
+                 license_manager=None):
         self.brain = brain
         self.brain_label = brain_label
         self.store = store or get_store()
+        # Phase 4: licensing gate. On a development build (no public key
+        # configured) the manager always reports "development" = allowed,
+        # so behaviour is exactly as before unless a release build turns
+        # enforcement on.
+        self.license_manager = license_manager or licensing.get_manager(self.store)
         self.queue = queue or TaskQueue(
             self.store, self._run_task, channel_resolver=self._resolve_channel
         )
@@ -75,6 +82,12 @@ class AgentSession:
         # proactive work can deliver back to this chat later.
         bound = LoopBoundChannel(chan, asyncio.get_running_loop())
         self._channels[str(key)] = bound
+
+        # Phase 4: the license gate sits before everything except /license
+        # and /help — in activation mode the brain is never invoked and
+        # nothing is queued; the owner just gets the activation notice.
+        if not await self._license_gate(text, bound):
+            return
 
         if text.startswith("/"):
             if await self._command(text, key, bound):
@@ -131,6 +144,29 @@ class AgentSession:
         except asyncio.CancelledError:
             pass
 
+    # ---------------------------------------------------------- licensing --
+
+    def _license_status(self):
+        try:
+            return self.license_manager.status()
+        except Exception:  # noqa: BLE001 - a licensing bug must not brick
+            return None          # the agent; status() itself is local+simple
+
+    async def _license_gate(self, text, chan):
+        """True when the message may proceed. In activation mode, answers
+        /license itself and replies to everything else with the notice."""
+        status = self._license_status()
+        if status is None or status.allowed:
+            return True
+        command = text.split()[0].lower() if text.startswith("/") else ""
+        if command == "/license":
+            await chan.send_text(licensing.license_text(status))
+            return False
+        if command in ("/help", "/start"):
+            return True     # help stays readable; it performs no work
+        await chan.send_text(licensing.activation_notice(status))
+        return False
+
     async def _run_task(self, row, chan, live):
         """Execute one queued task: the brain turn + the spoken reply.
 
@@ -140,6 +176,13 @@ class AgentSession:
         """
         key = row["session_key"]
         came_by_voice = live.came_by_voice if live is not None else False
+
+        # A task queued before the license lapsed (or a scheduled one) must
+        # not reach the brain in activation mode either.
+        status = self._license_status()
+        if status is not None and not status.allowed:
+            await chan.send_text(licensing.activation_notice(status))
+            return
 
         # The original showed Discord's "typing…" for the whole job; channels
         # that support it expose typing(), the rest skip it.
@@ -190,6 +233,14 @@ class AgentSession:
 
         if command in ("/help", "/start"):
             await chan.send_text(HELP.format(name=CONFIG.assistant_name))
+            return True
+
+        if command == "/license":
+            status = self._license_status()
+            if status is None:
+                await chan.send_text("License status is unavailable right now.")
+            else:
+                await chan.send_text(licensing.license_text(status))
             return True
 
         if command == "/voice":

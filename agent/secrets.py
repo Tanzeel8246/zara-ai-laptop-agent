@@ -29,6 +29,12 @@ SECRET_KEYS = (
     "CUSTOM_API_KEY",
     "GROQ_API_KEY",
     "ELEVENLABS_API_KEY",
+    # Phase 4: the activated license key + the server's validation token.
+    # A license key is a bearer credential — keyring only, never .env/SQLite
+    # (the .env fallback in get_secret exists so a keyring-less machine can
+    # still be activated by hand; see agent/licensing.py).
+    "LICENSE_KEY",
+    "LICENSE_TOKEN",
 )
 
 _warned = False

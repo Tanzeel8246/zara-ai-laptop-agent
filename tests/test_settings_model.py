@@ -203,4 +203,9 @@ def test_vision_warning_empty_for_gemini():
 def test_secret_fields_cover_all_keyring_keys():
     from agent.secrets import SECRET_KEYS
 
-    assert set(SECRET_FIELDS.values()) == set(SECRET_KEYS)
+    # Phase 4: LICENSE_KEY / LICENSE_TOKEN are keyring secrets too, but
+    # they are deliberately NOT Settings fields — the license panel /
+    # agent.licensing manages them, and they must never flow through the
+    # settings save path. Everything else must stay in exact sync.
+    licensing_managed = {"LICENSE_KEY", "LICENSE_TOKEN"}
+    assert set(SECRET_FIELDS.values()) == set(SECRET_KEYS) - licensing_managed

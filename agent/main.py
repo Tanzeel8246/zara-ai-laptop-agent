@@ -102,6 +102,22 @@ def run():
     brain, brain_label = make_brain()
     session = AgentSession(brain, brain_label)
 
+    # Phase 4: report the license state once at startup. On a development
+    # build this prints nothing; with enforcement on, an unactivated copy
+    # still starts (so /license and the wizard keep working) but the
+    # session gate answers every instruction with the activation notice.
+    from . import licensing
+
+    license_status = session._license_status()
+    if license_status is not None and license_status.state != "development":
+        print(f"\n  License: {licensing.status_line(license_status)}")
+        if not license_status.allowed:
+            print("  Activation mode: instructions will get the activation notice until a key is entered.")
+        try:
+            session.license_manager.refresh_online()
+        except Exception:  # noqa: BLE001 - offline startup is a normal case
+            pass
+
     # Phase 3: the task-queue worker (recovers any tasks a dead process
     # left 'running') and the scheduler thread (due schedules become
     # queued tasks). Both are daemon threads; transports are unaffected.

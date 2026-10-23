@@ -1,15 +1,18 @@
 """First-run setup wizard (PySide6 QWizard).
 
-Six pages — Welcome, License (honest placeholder), Brain, Transports,
-Behaviour, Finish. Everything the user types flows through
-desktop.settings_model.Settings only; the wizard never touches .env or the
-keyring directly. Re-runnable at any time from the tray menu.
+Six pages — Welcome, License, Brain, Transports, Behaviour, Finish.
+Settings pages flow through desktop.settings_model.Settings only; the
+License page is the exception by design: activation acts immediately
+(keyring + license server), so it hosts desktop.license_panel.LicensePanel
+bound to agent.licensing, not to the Settings model. Re-runnable at any
+time from the tray menu.
 """
 
 from PySide6.QtWidgets import QLabel, QVBoxLayout, QWizard, QWizardPage, QCheckBox
 
 from desktop import diagnostics
 from desktop.fields import BehaviourFields, BrainFields, GeneralFields, TransportsFields
+from desktop.license_panel import LicensePanel
 from desktop.settings_model import Settings
 
 
@@ -60,25 +63,18 @@ class WelcomePage(_FieldsPage):
 
 
 class LicensePage(QWizardPage):
-    def __init__(self):
+    """The real license page (Phase 4): hosts the shared LicensePanel."""
+
+    def __init__(self, license_client=None):
         super().__init__()
         self.setTitle("License")
-        self.setSubTitle("How licensing will work")
+        self.setSubTitle("Your trial, your key, this computer")
         layout = QVBoxLayout(self)
-        body = QLabel(
-            "This build is licensed when you buy CodeHubb Assistant: your purchase "
-            "email will contain a signed license key, and activation (including any "
-            "free trial) happens on this page in the release build.\n\n"
-            "Licensing arrives in a later phase of the product — there is nothing "
-            "to activate yet, and this page deliberately does not pretend to check "
-            "a key."
-        )
-        body.setWordWrap(True)
-        layout.addWidget(body)
-        state = QLabel("Current state:  Development build — no license required")
-        state.setStyleSheet("font-weight: bold;")
-        layout.addWidget(state)
-        layout.addStretch(1)
+        self.panel = LicensePanel(client=license_client)
+        layout.addWidget(self.panel)
+
+    def initializePage(self):
+        self.panel.refresh()
 
 
 class BrainPage(_FieldsPage):
@@ -148,7 +144,7 @@ class SetupWizard(QWizard):
     """Modal wizard bound to one Settings object; saves on Finish."""
 
     def __init__(self, settings=None, parent=None, *, completion=None,
-                 pairing_factory=None, env_path=None):
+                 pairing_factory=None, env_path=None, license_client=None):
         super().__init__(parent)
         self.settings = settings or Settings.load(env_path)
         self.env_path = env_path
@@ -157,7 +153,7 @@ class SetupWizard(QWizard):
         self.setWindowTitle(f"{self.settings.product_name} — Setup")
         self.setWizardStyle(QWizard.WizardStyle.ModernStyle)
         self.addPage(WelcomePage())
-        self.addPage(LicensePage())
+        self.addPage(LicensePage(license_client=license_client))
         self.addPage(BrainPage(completion=completion))
         self.addPage(TransportsPage(pairing_factory=pairing_factory))
         self.addPage(BehaviourPage())

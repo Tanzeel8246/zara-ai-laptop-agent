@@ -53,6 +53,7 @@ def build_report(
     keyring_ok=None,
     audit_lines=None,
     shell_log_lines=None,
+    license_info=None,
 ):
     root = Path(root) if root else ROOT
     config = agent_config.CONFIG
@@ -104,6 +105,32 @@ def build_report(
     out.append(f"  Node.js present        : {'yes' if node_present else 'no'}")
     out.append(f"  WhatsApp bridge ready  : {'yes (node_modules installed)' if sidecar_ready else 'no (npm install not run in sidecar/)'}")
     out.append(f"  OS keyring available   : {'yes' if keyring_ok else 'no — secrets fall back to .env'}")
+    out.append("")
+    out.append("License:")
+    if license_info is None:
+        try:
+            from agent import licensing as _licensing
+
+            license_info = _licensing.get_manager().status()
+        except Exception:  # noqa: BLE001 - diagnostics must always render
+            license_info = None
+    if license_info is None:
+        out.append("  (status unavailable)")
+    else:
+        # State only — the license KEY itself never appears in diagnostics.
+        out.append(f"  State          : {license_info.state}")
+        if license_info.plan:
+            out.append(f"  Plan           : {license_info.plan}")
+        if license_info.buyer_email:
+            out.append(f"  Licensed to    : {license_info.buyer_email}")
+        if license_info.days_left is not None:
+            out.append(f"  Days left      : {license_info.days_left}")
+        if license_info.machines_limit is not None:
+            used = license_info.machines_used
+            out.append(
+                f"  Machines       : {used if used is not None else '?'} of "
+                f"{license_info.machines_limit} used"
+            )
     out.append("")
     out.append("Last audit entries (up to 20):")
     if audit_lines:
