@@ -21,6 +21,7 @@ SERVICE_NAME = "codehubb-assistant"
 # Env var names whose values are secrets worth keeping in the keyring.
 SECRET_KEYS = (
     "DISCORD_BOT_TOKEN",
+    "TELEGRAM_BOT_TOKEN",
     "ANTHROPIC_API_KEY",
     "OPENAI_API_KEY",
     "GEMINI_API_KEY",
