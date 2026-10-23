@@ -28,8 +28,10 @@ from dataclasses import dataclass, field
 from pathlib import Path
 
 from .config import CONFIG
+from .context import reset_current_session_key, set_current_session_key
 from .security import classify, describe
 from .tools import load_all
+from .transport import session_key_of as _session_key_of
 
 SCHEMAS, HANDLERS = load_all()
 
@@ -165,6 +167,15 @@ class ToolExecutor:
             )
             return ToolOutcome(f"Unknown tool '{name}'.", is_error=True)
 
+        # Tools that need to know which chat they serve (scheduler tools)
+        # read the session key from a contextvar; to_thread copies the
+        # context into the handler thread, so set it just before the call.
+        token = None
+        if chan is not None:
+            try:
+                token = set_current_session_key(_session_key_of(chan))
+            except Exception:  # noqa: BLE001 - context is best-effort
+                token = None
         try:
             result = await asyncio.to_thread(handler, **args)
         except TypeError as exc:
@@ -172,6 +183,9 @@ class ToolExecutor:
         except Exception as exc:  # noqa: BLE001 - report, never crash the turn
             traceback.print_exc()
             return ToolOutcome(f"{name} raised {type(exc).__name__}: {exc}", is_error=True)
+        finally:
+            if token is not None:
+                reset_current_session_key(token)
 
         images = list(result.get("images") or [])
         files = list(result.get("files") or [])
