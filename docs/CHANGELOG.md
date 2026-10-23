@@ -1,5 +1,27 @@
 # Changelog — CodeHubb Assistant
 
+## 1.0.5 — 2026-10-23
+
+- **WhatsApp pairing hardening.** The owner reached the wizard QR, but
+  the phone refused server-side with WhatsApp's own "Couldn't link
+  device — Try again later." The bridge contributed a known weakness:
+  it negotiated whatever (possibly stale) WhatsApp protocol version the
+  installed Baileys build carried, and presented no browser identity.
+  The sidecar now fetches the current WhatsApp protocol version at
+  startup (`fetchLatestBaileysVersion`, bounded to 10s; on failure it
+  logs the fact and falls back to the library default — it never blocks
+  startup) and presents a mainstream desktop identity
+  (`Browsers.windows("Chrome")`) — the standard community remedies for
+  pairing refusals. The Baileys floor rises to `^6.7.24`, the build
+  the committed lockfile already pinned.
+- **Pairing attempts are readable in the log.** The sidecar log
+  (`.runtime/whatsapp/pairing.log` during wizard pairing) now shows the
+  negotiated protocol version, each "connecting" transition, and — on a
+  close — the disconnect reason next to the status code, so a support
+  reader can see that a pairing attempt reached the server and what it
+  answered. USER_GUIDE gains the phone-message entry: repeated attempts
+  make WhatsApp pause linking for hours; wait it out, then retry once.
+
 ## 1.0.4 — 2026-10-23
 
 - **The wizard now checks chat apps before letting you finish.** A
