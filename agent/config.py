@@ -183,6 +183,10 @@ class Config:
     voice_rate = os.getenv("VOICE_RATE", "+8%").strip() or "+0%"
     voice_pitch = os.getenv("VOICE_PITCH", "+2Hz").strip() or "+0Hz"
 
+    # ---- browser tool (Phase 3, Playwright) ----
+    # Headless by default; set BROWSER_HEADLESS=false to watch it work.
+    browser_headless = _bool("BROWSER_HEADLESS", "true")
+
     max_tool_output = 6000          # chars of tool output handed back to the model
     discord_msg_limit = 1900        # Discord hard limit is 2000
     runtime_dir = ROOT / ".runtime"
