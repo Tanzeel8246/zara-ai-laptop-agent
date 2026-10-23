@@ -14,7 +14,9 @@ from types import SimpleNamespace
 
 import websockets
 
+from agent import sidecar_setup
 from agent.config import CONFIG
+from agent.transport import whatsapp_transport as wt
 from agent.transport.whatsapp_transport import WhatsAppChannel, WhatsAppTransport
 
 OWNER = "923001234567"
@@ -223,3 +225,58 @@ async def test_bridge_other_text_held_while_confirm_pending(monkeypatch):
     finally:
         task.cancel()
         await sidecar.stop()
+
+
+# --------------------------------------- sidecar packages auto-install
+
+async def test_supervisor_auto_installs_packages_once(monkeypatch, tmp_path):
+    """Hotfix 1.0.2: missing node_modules -> the supervisor installs the
+    packages itself, once; a later start finds them and does not redo it."""
+    sidecar_dir = tmp_path / "sidecar"
+    sidecar_dir.mkdir()
+    monkeypatch.setattr(wt, "SIDECAR_DIR", sidecar_dir)
+    calls = []
+
+    def fake_install(dir_, node):
+        calls.append((dir_, node))
+        (Path(dir_) / "node_modules").mkdir()
+        return True, "WhatsApp bridge packages installed."
+
+    monkeypatch.setattr(sidecar_setup, "install_packages", fake_install)
+    transport, _session = make_transport(monkeypatch)
+    assert await transport._ensure_sidecar_packages("node") is True
+    assert calls == [(sidecar_dir, "node")]
+    # second start: node_modules now exists -> no reinstall
+    assert await transport._ensure_sidecar_packages("node") is True
+    assert len(calls) == 1
+
+
+async def test_supervisor_install_failure_attempted_once(monkeypatch, tmp_path):
+    sidecar_dir = tmp_path / "sidecar"
+    sidecar_dir.mkdir()
+    monkeypatch.setattr(wt, "SIDECAR_DIR", sidecar_dir)
+    calls = []
+
+    def fake_install(dir_, node):
+        calls.append((dir_, node))
+        return False, "npm ERR! boom"
+
+    monkeypatch.setattr(sidecar_setup, "install_packages", fake_install)
+    transport, _session = make_transport(monkeypatch)
+    assert await transport._ensure_sidecar_packages("node") is False
+    # not retried within the same process — the transport stays disabled
+    assert await transport._ensure_sidecar_packages("node") is False
+    assert len(calls) == 1
+
+
+async def test_supervisor_packages_already_present_skips_install(monkeypatch, tmp_path):
+    sidecar_dir = tmp_path / "sidecar"
+    (sidecar_dir / "node_modules").mkdir(parents=True)
+    monkeypatch.setattr(wt, "SIDECAR_DIR", sidecar_dir)
+
+    def forbidden_install(dir_, node):  # pragma: no cover - must not run
+        raise AssertionError("install attempted although packages exist")
+
+    monkeypatch.setattr(sidecar_setup, "install_packages", forbidden_install)
+    transport, _session = make_transport(monkeypatch)
+    assert await transport._ensure_sidecar_packages("node") is True

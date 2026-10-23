@@ -231,10 +231,108 @@ def test_pairing_flow_qr_then_connected(tmp_path):
 
 
 def test_pairing_missing_node_modules_is_an_error(tmp_path):
-    session = pairing.PairingSession(root=tmp_path, node="node", popen=lambda cmd, **kw: FakeSidecarProc())
+    # npm cannot be found anywhere -> auto-install is impossible, so the
+    # manual command remains as the fallback text (Hotfix 1.0.2).
+    session = pairing.PairingSession(
+        root=tmp_path, node="node", popen=lambda cmd, **kw: FakeSidecarProc(),
+        npm_resolver=lambda node: None,
+    )
     status = session.start()
     assert status.state == "error"
     assert "npm install" in status.detail
+
+
+class FakeInstallProc:
+    """A fake `npm install` process: runs until finish() is called."""
+
+    def __init__(self, rc=0, output="added 42 packages", on_finish=None):
+        self._rc = None
+        self._final_rc = rc
+        self._output = output
+        self._on_finish = on_finish
+        self.terminated = False
+
+    def finish(self):
+        if self._on_finish:
+            self._on_finish()
+        self._rc = self._final_rc
+
+    def poll(self):
+        return self._rc
+
+    def communicate(self):
+        return (self._output, None)
+
+    def terminate(self):
+        self.terminated = True
+        self._rc = 0
+
+    def kill(self):
+        self._rc = -9
+
+    def wait(self, timeout=None):
+        return self._rc
+
+
+def _install_dispatch(install_proc, sidecar_proc, calls):
+    def factory(cmd, **kw):
+        calls.append(list(cmd))
+        if len(cmd) > 1 and cmd[1] == "install":
+            return install_proc
+        return sidecar_proc
+    return factory
+
+
+def test_pairing_installs_packages_then_spawns(tmp_path):
+    sidecar_dir = tmp_path / "sidecar"
+    sidecar_dir.mkdir(parents=True)
+    install = FakeInstallProc(
+        rc=0, on_finish=lambda: (sidecar_dir / "node_modules").mkdir()
+    )
+    sidecar = FakeSidecarProc()
+    calls = []
+    session = pairing.PairingSession(
+        root=tmp_path, node="node", npm="npm",
+        popen=_install_dispatch(install, sidecar, calls),
+    )
+    status = session.start()
+    assert status.state == "installing"
+    assert "couple of minutes" in status.detail
+    assert session.poll().state == "installing"
+    install.finish()
+    status = session.poll()
+    assert status.state == "starting"          # sidecar spawned after install
+    assert any("index.js" in str(part) for cmd in calls for part in cmd)
+    session.stop()
+    assert sidecar.terminated is True
+
+
+def test_pairing_install_failure_shows_tail_and_fallback(tmp_path):
+    (tmp_path / "sidecar").mkdir(parents=True)
+    install = FakeInstallProc(rc=1, output="npm ERR! code E404\nnpm ERR! 404 Not Found")
+    session = pairing.PairingSession(
+        root=tmp_path, node="node", npm="npm",
+        popen=_install_dispatch(install, FakeSidecarProc(), []),
+    )
+    assert session.start().state == "installing"
+    install.finish()
+    status = session.poll()
+    assert status.state == "error"
+    assert "npm ERR!" in status.detail          # tail of npm's own output
+    assert "npm install" in status.detail       # manual command as fallback
+
+
+def test_pairing_stop_during_install_terminates_it(tmp_path):
+    (tmp_path / "sidecar").mkdir(parents=True)
+    install = FakeInstallProc(rc=0)
+    session = pairing.PairingSession(
+        root=tmp_path, node="node", npm="npm",
+        popen=_install_dispatch(install, FakeSidecarProc(), []),
+    )
+    assert session.start().state == "installing"
+    session.stop()
+    assert install.terminated is True
+    assert session.poll().state == "stopped"
 
 
 def test_pairing_logged_out_exit(tmp_path):

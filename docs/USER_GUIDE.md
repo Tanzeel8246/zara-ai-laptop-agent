@@ -219,6 +219,7 @@ you want to know exactly what your assistant did.
 | Discord bot is online but never replies | **Message Content Intent** is off. Enable it in the developer portal (Wizard page 4 instructions). |
 | "You are not authorised" / messages ignored | Your ID/number is not on that transport's allowlist, or you pasted the bot's ID instead of your own. Re-check in Settings. |
 | WhatsApp QR never appears or pairing fails | The sidecar needs Node.js 18+. The app normally resolves/downloads Node itself; check Diagnostics, then restart the agent. Re-pair from the wizard's Transports page. |
+| Pairing (or the agent) says the WhatsApp bridge packages are installing, or the install failed | First pairing — and the agent's first start — installs the bridge packages **automatically** (1.0.2+); on a slow connection it can take a couple of minutes, so just leave it running. If the automatic install fails, the message shows npm's own error plus the fallback: run `npm install` once inside the `sidecar` folder by hand, then retry. |
 | WhatsApp stopped working days later | The linked session may have been logged out (or the number restricted — see the disclaimer). Re-pair with the QR; consider a fresh dedicated number. |
 | Voice notes are ignored / very slow | First voice note downloads the offline speech model once. Add a free Groq key for ~1-second transcription. |
 | Assistant stops mid-task | It hit the step limit (`MAX_ITERATIONS`). Send "continue", or raise the limit in Settings. |
