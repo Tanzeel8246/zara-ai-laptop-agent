@@ -32,6 +32,9 @@ SECRET_FIELDS = {
     # settings attribute -> env var name (must stay in sync with secrets.SECRET_KEYS)
     "discord_token": "DISCORD_BOT_TOKEN",
     "telegram_token": "TELEGRAM_BOT_TOKEN",
+    # Secret-class although it looks like a plain URL: it can embed proxy
+    # credentials, so it follows the token into the keyring (Hotfix 1.0.7).
+    "telegram_proxy": "TELEGRAM_PROXY",
     "anthropic_key": "ANTHROPIC_API_KEY",
     "openai_key": "OPENAI_API_KEY",
     "gemini_key": "GEMINI_API_KEY",
@@ -140,6 +143,7 @@ class Settings:
     # secrets (transient; persisted only to the keyring)
     discord_token: str = ""
     telegram_token: str = ""
+    telegram_proxy: str = ""
     anthropic_key: str = ""
     openai_key: str = ""
     gemini_key: str = ""

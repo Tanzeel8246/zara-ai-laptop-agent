@@ -278,6 +278,17 @@ class TransportsFields(QWidget):
         t_layout.addWidget(QLabel("Allowed Telegram user IDs (comma-separated; message @userinfobot to learn yours):"))
         self.telegram_ids = QLineEdit()
         t_layout.addWidget(self.telegram_ids)
+        t_layout.addWidget(QLabel("Proxy (optional):"))
+        self.telegram_proxy = _secret_line_edit()
+        self.telegram_proxy.setPlaceholderText(
+            "socks5://127.0.0.1:1080 or http://127.0.0.1:8080 — leave empty for a direct connection"
+        )
+        t_layout.addWidget(self.telegram_proxy)
+        proxy_hint = QLabel(
+            "If Telegram is blocked on your network, route the bot through a local VPN/proxy."
+        )
+        proxy_hint.setWordWrap(True)
+        t_layout.addWidget(proxy_hint)
         layout.addWidget(self.telegram_group)
 
         self.whatsapp_group = QGroupBox("WhatsApp (unofficial bridge)")
@@ -375,6 +386,7 @@ class TransportsFields(QWidget):
         self.discord_ids.setText(settings.discord_allowed_user_ids)
         self.telegram_token.setText(settings.telegram_token)
         self.telegram_ids.setText(settings.telegram_allowed_user_ids)
+        self.telegram_proxy.setText(settings.telegram_proxy)
         self.whatsapp_numbers.setText(settings.whatsapp_allowed_numbers)
         self._prefill_pair_number()
 
@@ -391,6 +403,7 @@ class TransportsFields(QWidget):
         settings.discord_allowed_user_ids = self.discord_ids.text().strip()
         settings.telegram_token = self.telegram_token.text().strip()
         settings.telegram_allowed_user_ids = self.telegram_ids.text().strip()
+        settings.telegram_proxy = self.telegram_proxy.text().strip()
         settings.whatsapp_allowed_numbers = self.whatsapp_numbers.text().strip()
         return []
 

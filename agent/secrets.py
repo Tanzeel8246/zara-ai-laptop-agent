@@ -22,6 +22,9 @@ SERVICE_NAME = "codehubb-assistant"
 SECRET_KEYS = (
     "DISCORD_BOT_TOKEN",
     "TELEGRAM_BOT_TOKEN",
+    # Hotfix 1.0.7: the optional Telegram proxy URL can embed proxy
+    # credentials (user:password@host), so it is a secret like the token.
+    "TELEGRAM_PROXY",
     "ANTHROPIC_API_KEY",
     "OPENAI_API_KEY",
     "GEMINI_API_KEY",

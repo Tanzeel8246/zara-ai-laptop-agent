@@ -17,6 +17,7 @@ import sys
 import time
 import uuid
 from pathlib import Path
+from urllib.parse import urlparse
 
 from ..config import CONFIG
 from . import IncomingMessage
@@ -26,6 +27,45 @@ CONFIRM_TIMEOUT = 180             # seconds, same as the Discord buttons
 IMAGE_EXTS = (".png", ".jpg", ".jpeg", ".gif", ".webp")
 VOICE_EXTS = (".ogg", ".oga", ".opus")
 AUDIO_EXTS = (".mp3", ".m4a", ".wav", ".flac", ".aac") + VOICE_EXTS
+
+
+def mask_proxy_url(url):
+    """Reduce a proxy URL to scheme + host[:port] for logging.
+
+    A proxy URL can embed credentials (``socks5://user:pass@host:1080``);
+    those must never reach a log line or a diagnostics report. Anything
+    unparseable degrades to a fixed placeholder, never the raw value."""
+    try:
+        parsed = urlparse(str(url).strip())
+        host = parsed.hostname or ""
+        if not parsed.scheme or not host:
+            return "(proxy set)"
+        shown = f"{parsed.scheme}://{host}"
+        if parsed.port:
+            shown += f":{parsed.port}"
+        return shown
+    except Exception:  # noqa: BLE001 - masking must never raise into startup
+        return "(proxy set)"
+
+
+def build_application(token, proxy=""):
+    """Construct the python-telegram-bot Application (Hotfix 1.0.7).
+
+    Extracted from TelegramTransport.run() so the proxy wiring is testable
+    at the builder boundary without a network. PTB 22.x: the builder's
+    .proxy() feeds the request used for Bot API calls and
+    .get_updates_proxy() the SEPARATE request used for long polling —
+    `_build_request(get_updates=True)` reads only `_get_updates_proxy`
+    (no fallback to the main proxy), so both must be set. Empty proxy =
+    no builder calls at all = exactly the pre-1.0.7 behaviour.
+    """
+    from telegram.ext import Application
+
+    builder = Application.builder().token(token)
+    proxy = (proxy or "").strip()
+    if proxy:
+        builder = builder.proxy(proxy).get_updates_proxy(proxy)
+    return builder.build()
 
 
 def chunks(text, size):
@@ -278,9 +318,9 @@ class TelegramTransport:
     # ---- lifecycle ----
 
     def run(self):
-        from telegram.ext import Application, CallbackQueryHandler, MessageHandler, filters
+        from telegram.ext import CallbackQueryHandler, MessageHandler, filters
 
-        app = Application.builder().token(CONFIG.telegram_token).build()
+        app = build_application(CONFIG.telegram_token, CONFIG.telegram_proxy)
         self.app = app
         app.add_handler(CallbackQueryHandler(self._on_callback))
         app.add_handler(MessageHandler(filters.ALL, self._on_message))
@@ -288,8 +328,12 @@ class TelegramTransport:
 
         print(f"\n  {CONFIG.product_name} — Telegram transport starting (long polling)")
         print(f"  authorised Telegram user IDs: {', '.join(str(i) for i in CONFIG.telegram_allowed_users)}")
-        # run_polling raises on an invalid token / network death; the caller
-        # (composition root thread) logs it and the other transports live on.
+        if (CONFIG.telegram_proxy or "").strip():
+            # Scheme + host only — the URL can embed proxy credentials.
+            print(f"  Telegram proxy in use: {mask_proxy_url(CONFIG.telegram_proxy)}")
+        # run_polling raises on an invalid token / network death; the
+        # supervisor (agent/supervisor.py) retries with backoff, so a dead
+        # network is a pause, not the end of this transport.
         app.run_polling(drop_pending_updates=True)
 
     @staticmethod
