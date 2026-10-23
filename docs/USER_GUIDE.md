@@ -162,6 +162,11 @@ is ignored.
   sending messages, clicking in the browser, editing the registry…) pause
   and ask you first. On Telegram you get real **Approve / Deny buttons**;
   on Discord and WhatsApp you reply to the confirmation message.
+  **A refusal is final for that instruction** (since 1.0.10): if you deny
+  a prompt — or simply don't answer it before it times out — the
+  assistant cannot retry that action or reach the same result another
+  way during the same instruction. It can still look at things and
+  report back, and your next instruction starts with a clean slate.
 - **Voice replies** — `auto` (speak only when you sent a voice note),
   `always`, or `never`.
 - **Auto-start** — start the assistant when you log in to Windows.

@@ -41,6 +41,12 @@ class FakeBuilder:
         self.calls.append(("token", value))
         return self
 
+    def concurrent_updates(self, value):
+        # Hotfix 1.0.10: build_application always enables concurrent
+        # update handling (PTB's serial default starves confirm taps).
+        self.calls.append(("concurrent_updates", value))
+        return self
+
     def proxy(self, value):
         self.calls.append(("proxy", value))
         return self

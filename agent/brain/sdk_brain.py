@@ -164,6 +164,9 @@ class SdkBrain:
         self.busy.add(key)
         token = _CHAN.set(chan)
         _ACTIVE = chan          # authoritative: survives the SDK's context snapshot
+        # Hotfix 1.0.10: same denial-latch bracketing as the API brain —
+        # both brains share the one pipeline, so both get the guarantee.
+        self.executor.begin_turn()
         try:
             client = await self._client(key)
             prompt = user_text
@@ -219,6 +222,7 @@ class SdkBrain:
             self.reset(key)
             await chan.send_text(f"Agent error: `{type(exc).__name__}: {exc}`")
         finally:
+            self.executor.end_turn()
             self.busy.discard(key)
             _CHAN.reset(token)
             if _ACTIVE is chan:      # don't clobber a turn that started meanwhile

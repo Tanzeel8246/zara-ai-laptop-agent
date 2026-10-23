@@ -58,10 +58,20 @@ def build_application(token, proxy=""):
     `_build_request(get_updates=True)` reads only `_get_updates_proxy`
     (no fallback to the main proxy), so both must be set. Empty proxy =
     no builder calls at all = exactly the pre-1.0.7 behaviour.
+
+    Hotfix 1.0.10: .concurrent_updates(True) is NOT optional. PTB's
+    builder default is max_concurrent_updates=1 — updates are handled
+    strictly one at a time, so any handler that takes a while (a voice
+    note being transcribed inside the message handler, or the session's
+    inline fallback running a whole turn in-handler) starves every
+    callback query behind it: the owner's confirmation taps and /cancel
+    would sit unprocessed until the handler finished, and a pending
+    confirmation could only ever end by timeout. Work itself stays
+    serialised by the task queue; update HANDLING must not be.
     """
     from telegram.ext import Application
 
-    builder = Application.builder().token(token)
+    builder = Application.builder().token(token).concurrent_updates(True)
     proxy = (proxy or "").strip()
     if proxy:
         builder = builder.proxy(proxy).get_updates_proxy(proxy)
