@@ -1,5 +1,24 @@
 # Changelog — CodeHubb Assistant
 
+## 1.0.3 — 2026-10-23
+
+- **A crashed WhatsApp bridge now says why.** The wizard's pairing
+  sidecar used to discard the bridge's output entirely, so a crash
+  surfaced as a bare "The WhatsApp bridge stopped (exit code 1)". The
+  output now goes to `.runtime/whatsapp/pairing.log`, and the pairing
+  status carries the bridge's own last lines after that message. The
+  most common cause — a leftover bridge still holding the port
+  (`EADDRINUSE`) — leads with the plain-language remedy (end `node.exe`
+  in Task Manager or restart the PC, then pair again).
+- **The agent keeps the same evidence.** The supervisor already relayed
+  sidecar output to its console; it now also persists it to
+  `.runtime/whatsapp/sidecar.log`, drains the final lines before
+  reporting a death, and re-prints the tail when the bridge exits
+  unexpectedly (the logged-out vs crash distinction is unchanged).
+- **Diagnostics shows both WhatsApp logs.** The support bundle gains
+  the last 15 lines of `pairing.log` and `sidecar.log` whenever they
+  exist, so a bridge failure can be diagnosed from the bundle alone.
+
 ## 1.0.2 — 2026-10-23
 
 - **WhatsApp bridge packages install themselves.** On first pairing

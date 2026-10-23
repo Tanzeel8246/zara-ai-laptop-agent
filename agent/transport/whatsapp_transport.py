@@ -25,6 +25,7 @@ import json
 import os
 import sys
 import time
+from datetime import datetime
 from pathlib import Path
 
 from .. import sidecar_setup
@@ -36,6 +37,34 @@ IMAGE_EXTS = (".png", ".jpg", ".jpeg", ".gif", ".webp")
 VOICE_EXTS = (".ogg", ".oga", ".opus")
 SIDECAR_DIR = ROOT / "sidecar"
 LOGGED_OUT_EXIT = 2               # sidecar exit code: pairing is gone, do not restart
+SIDECAR_LOG_TAIL_LINES = 6        # bridge lines re-printed when it dies
+SESSION_HEADER_PREFIX = "===== sidecar session"
+
+
+def sidecar_log_tail(path, count=SIDECAR_LOG_TAIL_LINES):
+    """The last `count` non-empty lines of sidecar.log (session headers
+    excluded) — the bridge's own last words, for death reports."""
+    try:
+        lines = Path(path).read_text(
+            encoding="utf-8", errors="replace"
+        ).splitlines()
+    except OSError:
+        return []
+    lines = [
+        line.strip() for line in lines
+        if line.strip() and not line.startswith(SESSION_HEADER_PREFIX)
+    ]
+    return lines[-count:]
+
+
+def append_sidecar_log(path, text):
+    """Append one line to sidecar.log. Never raises — logging must not
+    be able to take the transport down."""
+    with contextlib.suppress(OSError):
+        path = Path(path)
+        path.parent.mkdir(parents=True, exist_ok=True)
+        with open(path, "a", encoding="utf-8") as fh:
+            fh.write(text + "\n")
 
 YES_WORDS = {"yes", "y", "ہاں", "جی", "جی ہاں"}
 NO_WORDS = {"no", "n", "نہیں", "نہ"}
@@ -286,6 +315,7 @@ class WhatsAppTransport:
             return
 
         wa_dir = CONFIG.runtime_dir / "whatsapp"
+        sidecar_log = wa_dir / "sidecar.log"
         env = dict(
             os.environ,
             WA_BRIDGE_PORT=str(CONFIG.wa_bridge_port),
@@ -295,19 +325,36 @@ class WhatsAppTransport:
         )
         backoff = 2
         while not self._stopped:
+            stamp = datetime.now().isoformat(timespec="seconds")
+            append_sidecar_log(
+                sidecar_log, f"{SESSION_HEADER_PREFIX} {stamp} ====="
+            )
             self._proc = await asyncio.create_subprocess_exec(
                 node, str(SIDECAR_DIR / "index.js"),
                 cwd=str(ROOT), env=env,
                 stdout=asyncio.subprocess.PIPE, stderr=asyncio.subprocess.STDOUT,
             )
-            pump = asyncio.create_task(self._pump_output(self._proc))
+            pump = asyncio.create_task(self._pump_output(self._proc, sidecar_log))
             bridge = asyncio.create_task(self._bridge_loop(self._proc))
             rc = await self._proc.wait()
             bridge.cancel()
+            # Let the pump drain the pipe into sidecar.log before it is
+            # cancelled — the bridge's final lines are the diagnosis.
+            with contextlib.suppress(Exception):
+                await asyncio.wait_for(pump, timeout=2)
             pump.cancel()
             self._ws = None
             if self._stopped:
                 return
+            # The bridge's own last words, kept in sidecar.log and
+            # repeated here so a death is never a bare exit code.
+            tail = sidecar_log_tail(sidecar_log)
+            if tail:
+                print(
+                    "[whatsapp] Last sidecar output before it exited:\n"
+                    + "\n".join(f"  {line}" for line in tail),
+                    file=sys.stderr,
+                )
             if rc == LOGGED_OUT_EXIT:
                 print(
                     "\n  [whatsapp] The WhatsApp pairing was logged out (phone removed the "
@@ -321,13 +368,32 @@ class WhatsAppTransport:
             await asyncio.sleep(backoff)
             backoff = min(backoff * 2, 60)
 
-    async def _pump_output(self, proc):
-        with contextlib.suppress(Exception):
-            while True:
-                line = await proc.stdout.readline()
-                if not line:
-                    return
-                print(f"[whatsapp-sidecar] {line.decode(errors='replace').rstrip()}")
+    async def _pump_output(self, proc, log_path=None):
+        """Relay sidecar output to our log — and persist it to
+        .runtime/whatsapp/sidecar.log, so Diagnostics can show the real
+        bridge error long after the console scrolled away."""
+        log_handle = None
+        if log_path is not None:
+            with contextlib.suppress(OSError):
+                log_path = Path(log_path)
+                log_path.parent.mkdir(parents=True, exist_ok=True)
+                log_handle = open(log_path, "a", encoding="utf-8")
+        try:
+            with contextlib.suppress(Exception):
+                while True:
+                    line = await proc.stdout.readline()
+                    if not line:
+                        return
+                    text = line.decode(errors="replace").rstrip()
+                    print(f"[whatsapp-sidecar] {text}")
+                    if log_handle is not None:
+                        with contextlib.suppress(OSError):
+                            log_handle.write(text + "\n")
+                            log_handle.flush()
+        finally:
+            if log_handle is not None:
+                with contextlib.suppress(OSError):
+                    log_handle.close()
 
     async def _bridge_loop(self, proc):
         """Connect to the sidecar's bridge and dispatch until it dies."""

@@ -17,6 +17,11 @@ agent.sidecar_setup helper — the same courtesy the agent's supervisor
 performs) and reports state "installing" while it runs. The manual
 command is only ever shown when that automation is impossible or fails.
 
+The sidecar's stdout/stderr go to .runtime/whatsapp/pairing.log (never
+/dev/null): when the bridge dies, the last lines of that log ride along
+in the status detail, so "exit code 1" always arrives with the actual
+Node error attached. Diagnostics bundles the same log.
+
 The Popen factory is injectable for tests.
 """
 
@@ -24,6 +29,7 @@ import os
 import subprocess
 import sys
 from dataclasses import dataclass
+from datetime import datetime
 from pathlib import Path
 
 from agent import sidecar_setup
@@ -35,6 +41,67 @@ INSTALLING_DETAIL = (
     "Installing WhatsApp bridge packages — first time only, "
     "this can take a couple of minutes…"
 )
+
+SESSION_HEADER_PREFIX = "===== pairing session"
+LOG_TAIL_COUNT = 6          # bridge lines attached to a "stopped" detail
+LOG_LINE_MAX_CHARS = 200    # per line, so the detail stays readable
+ADDR_IN_USE_DETAIL = (
+    "Another copy of the WhatsApp bridge is already running — probably "
+    "left over from an earlier test. End the node.exe process(es) in "
+    "Task Manager or restart the PC, then try again."
+)
+
+
+def session_log_lines(log_path):
+    """The bridge's own lines from the latest pairing session in the log.
+
+    The log is append-only across sessions, each introduced by a header
+    line; only the section after the last header belongs to the run that
+    just died. Header lines themselves are never included.
+    """
+    try:
+        lines = Path(log_path).read_text(
+            encoding="utf-8", errors="replace"
+        ).splitlines()
+    except OSError:
+        return []
+    start = 0
+    for i, line in enumerate(lines):
+        if line.startswith(SESSION_HEADER_PREFIX):
+            start = i + 1
+    return [
+        line for line in lines[start:]
+        if not line.startswith(SESSION_HEADER_PREFIX)
+    ]
+
+
+def log_tail(log_path, count=LOG_TAIL_COUNT):
+    """The last `count` non-empty lines of the current session's log."""
+    lines = [line.strip() for line in session_log_lines(log_path)]
+    lines = [line for line in lines if line]
+    return [line[:LOG_LINE_MAX_CHARS] for line in lines[-count:]]
+
+
+def log_mentions_addr_in_use(log_path):
+    text = "\n".join(session_log_lines(log_path)).lower()
+    return "eaddrinuse" in text or "address already in use" in text
+
+
+def stopped_detail(log_path, rc):
+    """The "bridge stopped" message, with the bridge's own last words.
+
+    The plain stopped line comes first (an address-in-use failure leads
+    with its plain-language remedy instead), then the tail of the log —
+    the real Node error, never a bare exit code.
+    """
+    parts = []
+    if log_mentions_addr_in_use(log_path):
+        parts.append(ADDR_IN_USE_DETAIL)
+    parts.append(f"The WhatsApp bridge stopped (exit code {rc}).")
+    tail = log_tail(log_path)
+    if tail:
+        parts.append("\n".join(tail))
+    return "\n".join(parts)
 
 
 @dataclass
@@ -51,6 +118,7 @@ class PairingSession:
         self.wa_dir = self.root / ".runtime" / "whatsapp"
         self.auth_dir = self.wa_dir / "auth"
         self.qr_file = self.wa_dir / "qr.txt"
+        self.log_file = self.wa_dir / "pairing.log"
         self.port = port
         self._popen = popen or subprocess.Popen
         self._node = node  # None = resolve in start()
@@ -59,6 +127,7 @@ class PairingSession:
         self._proc = None
         self._install_proc = None
         self._node_resolved = None
+        self._log_handle = None
         self._error = ""
 
     def start(self):
@@ -110,6 +179,36 @@ class PairingSession:
         self._spawn_sidecar(node)
         return self.poll()
 
+    def _open_log(self):
+        """Open pairing.log for appending and stamp a session header.
+
+        Returns the handle (kept open for the sidecar's lifetime), or
+        None when the log cannot be opened — the spawn then falls back
+        to DEVNULL rather than failing the pairing outright.
+        """
+        self._close_log()
+        try:
+            self.wa_dir.mkdir(parents=True, exist_ok=True)
+            handle = open(self.log_file, "ab")
+            stamp = datetime.now().isoformat(timespec="seconds")
+            header = (
+                f"\n{SESSION_HEADER_PREFIX} {stamp} (port {self.port}) =====\n"
+            )
+            handle.write(header.encode("utf-8"))
+            handle.flush()
+        except OSError:
+            return None
+        self._log_handle = handle
+        return handle
+
+    def _close_log(self):
+        handle, self._log_handle = self._log_handle, None
+        if handle is not None:
+            try:
+                handle.close()
+            except OSError:
+                pass
+
     def _spawn_sidecar(self, node):
         sidecar_dir = self.root / "sidecar"
         self.wa_dir.mkdir(parents=True, exist_ok=True)
@@ -125,8 +224,17 @@ class PairingSession:
             WA_MEDIA_DIR=str(self.wa_dir / "media"),
             WA_QR_FILE=str(self.qr_file),
         )
-        kwargs = {"cwd": str(self.root), "env": env,
-                  "stdout": subprocess.DEVNULL, "stderr": subprocess.DEVNULL}
+        # The sidecar's output IS the diagnosis when it dies — until
+        # 1.0.2 it went to DEVNULL and a crash surfaced as a bare
+        # "exit code 1" with the real Node error thrown away.
+        log_handle = self._open_log()
+        kwargs = {"cwd": str(self.root), "env": env}
+        if log_handle is not None:
+            kwargs["stdout"] = log_handle
+            kwargs["stderr"] = subprocess.STDOUT
+        else:
+            kwargs["stdout"] = subprocess.DEVNULL
+            kwargs["stderr"] = subprocess.DEVNULL
         if sys.platform.startswith("win"):
             kwargs["creationflags"] = getattr(subprocess, "CREATE_NO_WINDOW", 0)
         self._proc = self._popen([node, str(sidecar_dir / "index.js")], **kwargs)
@@ -141,12 +249,20 @@ class PairingSession:
             return PairingStatus("stopped", detail="Pairing has not been started.")
         rc = self._proc.poll()
         if rc is not None:
+            self._close_log()
             if rc == LOGGED_OUT_EXIT:
                 return PairingStatus(
                     "logged_out",
                     detail="WhatsApp logged this device out. Start pairing again to get a fresh QR.",
                 )
-            return PairingStatus("stopped", detail=f"The WhatsApp bridge stopped (exit code {rc}).")
+            if rc == 0:
+                return PairingStatus(
+                    "stopped",
+                    detail="The WhatsApp bridge stopped (exit code 0).",
+                )
+            return PairingStatus(
+                "stopped", detail=stopped_detail(self.log_file, rc)
+            )
         if (self.auth_dir / "creds.json").exists():
             return PairingStatus("connected", detail="Phone linked — WhatsApp is ready.")
         if self.qr_file.exists():
@@ -199,6 +315,7 @@ class PairingSession:
         self._install_proc = None
         self._terminate(self._proc)
         self._proc = None
+        self._close_log()
 
 
 def make_qr_png_bytes(qr_text, box_size=8, border=2):
