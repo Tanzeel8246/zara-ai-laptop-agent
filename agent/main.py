@@ -11,6 +11,12 @@ telegram, whatsapp). They share ONE brain, ONE safety pipeline and ONE
 session manager, and each runs in its own thread so one transport failing
 (bad token, missing Node.js, a dropped network) never takes the others down.
 
+Hotfix 1.0.7: each thread is a SUPERVISOR (agent/supervisor.py), not a
+one-shot run — a transport that crashes (e.g. the ISP blocking Telegram's
+servers outright) is retried with backoff for as long as the agent runs, so
+the agent stays alive even with every transport temporarily down and heals
+by itself when the network comes back.
+
 This module keeps only startup concerns: single-instance lock, setup
 validation, the wait-for-network gate, and construction.
 """
@@ -18,9 +24,8 @@ validation, the wait-for-network gate, and construction.
 import sys
 import threading
 import time
-import traceback
 
-from . import netrecover
+from . import netrecover, supervisor
 from .config import CONFIG, validate, validate_warnings
 
 
@@ -68,15 +73,11 @@ def _build_transports(session):
 
 
 def _run_transport(transport):
-    try:
-        transport.run()
-    except SystemExit as exc:
-        # A transport that exits itself (e.g. Discord rejecting its token)
-        # ends only its own thread; the others keep serving.
-        print(f"\n  [{transport.name}] transport stopped (exit code {exc.code}).\n", file=sys.stderr)
-    except Exception:  # noqa: BLE001
-        traceback.print_exc()
-        print(f"\n  [{transport.name}] transport crashed; the others keep running.\n", file=sys.stderr)
+    # Supervised, not one-shot: a crashed transport is retried with backoff
+    # (agent/supervisor.py) instead of taking its thread — and, when it was
+    # the only transport, the whole agent — down with it. Only a transport
+    # whose run() RETURNS (a deliberate stop) ends this thread.
+    supervisor.supervise_transport(transport)
 
 
 def run():

@@ -88,6 +88,12 @@ class Config:
 
     telegram_token = get_secret("TELEGRAM_BOT_TOKEN")
     telegram_allowed_users = _ids(os.getenv("TELEGRAM_ALLOWED_USER_IDS"))
+    # Optional proxy for the Telegram Bot API (Hotfix 1.0.7). Some ISPs
+    # block api.telegram.org outright (TCP connects, the TLS handshake
+    # times out — SNI filtering); a local VPN/proxy endpoint restores the
+    # route. Blank = direct connection, exactly as before. Secret-class:
+    # a proxy URL can embed credentials, so it lives in the keyring.
+    telegram_proxy = get_secret("TELEGRAM_PROXY")
 
     # WhatsApp (Route A, Baileys sidecar): no token — pairing is by QR scan.
     # The allowlist is phone numbers in international format, digits only.

@@ -1,5 +1,31 @@
 # Changelog — CodeHubb Assistant
 
+## 1.0.7 — 2026-10-23
+
+- **A dead network no longer kills a transport — or the agent.** Found
+  live on the owner's machine: his ISP blocks Telegram's servers
+  (`api.telegram.org` — the connection opens, the encrypted handshake
+  times out), so the Telegram transport crashed seconds after starting
+  and, being the only transport, took the whole agent down with it.
+  Transports are now supervised: a crashed transport is retried with
+  capped exponential backoff (**5s → 15s → 30s → 60s → 5 min**) for as
+  long as the agent runs, with plain-language log lines ("Telegram
+  unreachable — retrying in 30s"). The agent stays alive even with every
+  transport down, and a transport that recovers resumes without an agent
+  restart. A transport that stops *on purpose* is still not restarted.
+- **Bad credentials are named, not mistaken for the network.** A rejected
+  sign-in (e.g. an invalid bot token) gets its own log line saying the
+  token is the likely problem; it still retries, in case the service
+  glitched, but nobody has to guess which failure they are looking at.
+- **Telegram proxy option.** Settings/Wizard → Chats → Telegram gains an
+  optional **Proxy** field (`socks5://…` / `http://…`). When set, the bot
+  API traffic — both ordinary calls and the long-polling connection —
+  goes through it, which routes around ISPs that block Telegram. The
+  value is treated as a secret (it can embed proxy credentials): it is
+  stored in the OS keyring like the bot token, and logs only ever show
+  its scheme and host. Empty (the default) = a direct connection, exactly
+  as before.
+
 ## 1.0.6 — 2026-10-23
 
 - **Pairing-code linking for WhatsApp — an alternative to the QR.**

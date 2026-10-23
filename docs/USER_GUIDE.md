@@ -96,6 +96,10 @@ WhatsApp number) is still empty — either complete it or untick the app.
 2. Paste the bot **token** into the wizard.
 3. Add **your numeric Telegram user ID** to the allowlist (message
    @userinfobot to learn it).
+4. *(Only if Telegram is blocked on your network — see Troubleshooting)*
+   set the **Proxy** field to your local VPN/proxy endpoint, e.g.
+   `socks5://127.0.0.1:1080`. Like the token, it is stored in your OS
+   keyring, never in a plain file.
 
 **WhatsApp**
 1. Tick WhatsApp and add **your own number** (international format,
@@ -232,6 +236,7 @@ you want to know exactly what your assistant did.
 |---|---|
 | Discord bot is online but never replies | **Message Content Intent** is off. Enable it in the developer portal (Wizard page 4 instructions). |
 | "You are not authorised" / messages ignored | Your ID/number is not on that transport's allowlist, or you pasted the bot's ID instead of your own. Re-check in Settings. |
+| Telegram bot never replies, and the log keeps saying **"Telegram unreachable — retrying in …"** (older builds: the transport stopped seconds after starting, with `NetworkError` / a TLS handshake timeout to `api.telegram.org` in `.runtime/agent-shell.log`) | Some networks and ISPs **block Telegram's servers** (`api.telegram.org`): the connection opens but the encrypted handshake times out, so the bot can never come online from that network — it is not your token or ID (both check out before this point). Since **1.0.7** the transport retries on its own with a growing delay, so a temporary block is a pause, not a shutdown — but a permanent block needs another route: **(a)** try a different network (e.g. a phone hotspot), **(b)** run a VPN on the PC, or **(c)** set the **Telegram proxy** (Wizard/Settings → Chats → Telegram → **Proxy**) to your local VPN/proxy endpoint, e.g. `socks5://127.0.0.1:1080`. If the log instead says the sign-in was **rejected**, that is a bad bot token — re-paste it from @BotFather. |
 | WhatsApp QR never appears or pairing fails | The sidecar needs Node.js 18+. The app normally resolves/downloads Node itself; check Diagnostics, then restart the agent. Re-pair from the wizard's Transports page. |
 | The phone says **"Couldn't link device — Try again later"** after scanning the QR | That message comes from WhatsApp itself: after several failed linking attempts it **temporarily pauses linking** for the number. Stop retrying — every extra attempt extends the pause. Wait several hours (ideally overnight), make sure the agent is stopped (tray → Quit), then try **once** more with a fresh QR. Since **1.0.5** the app also fetches the latest WhatsApp protocol version automatically at startup, which removes the outdated-version cause of this refusal. You can also try the **Pairing code** method on the Transports page (1.0.6+) — it requests the same link through a different mechanism and is sometimes accepted where the QR scan is refused. It is an alternative, not a guarantee: WhatsApp can decline it too, in which case the working choices are Telegram/Discord, or waiting and retrying later. If it still refuses after a quiet night, the number itself may be restricted for unofficial bridges — see [WHATSAPP_DISCLAIMER.md](WHATSAPP_DISCLAIMER.md) and consider a dedicated number. |
 | Pairing (or the agent) says the WhatsApp bridge packages are installing, or the install failed | First pairing — and the agent's first start — installs the bridge packages **automatically** (1.0.2+); on a slow connection it can take a couple of minutes, so just leave it running. If the automatic install fails, the message shows npm's own error plus the fallback: run `npm install` once inside the `sidecar` folder by hand, then retry. |
