@@ -224,6 +224,9 @@ you want to know exactly what your assistant did.
 | Assistant stops mid-task | It hit the step limit (`MAX_ITERATIONS`). Send "continue", or raise the limit in Settings. |
 | "Activation required" replies | Trial ended or the key was rejected. Run `/license`, then activate a valid key in the wizard's License page. |
 | Update offered but install fails | Close the app fully (tray → Quit), then run the downloaded installer manually. Your settings and memory are kept. |
+| Wizard page is cut off — the bottom (or the WhatsApp QR) is off-screen and cannot be reached | Fixed in **1.0.1**: every wizard page scrolls and the QR is sized to fit the page. Update to 1.0.1 or later. |
+| Brain **Test connection** says "Setup incomplete: the 'litellm' package is not installed…" (older builds show a raw `ModuleNotFoundError: No module named 'litellm'`) | The app's Python packages were installed into a different environment than the one the app is running from. Close the wizard, open PowerShell **in the app folder**, activate the virtual environment (`.venv\Scripts\activate`), run `pip install -r requirements-gui.txt`, then start the app again **from that same window**. |
+| Brain **Test connection** fails right after typing a model name | The Model field needs the **exact model ID** (e.g. `gemini-2.5-pro`), not a display name like "Gemini 3.8 Flash". Leave the prefilled value, or clear the field — an empty field uses the provider's default ID. |
 
 ## 7. FAQ
 

@@ -10,6 +10,8 @@ Subscription mode can't be probed with a cheap API call, so it checks for
 the Claude Code CLI instead and says exactly that.
 """
 
+import re
+
 from agent import config as agent_config
 from agent.brain.providers import build_model_string, get_provider
 
@@ -19,6 +21,27 @@ def default_completion(**kwargs):
     import litellm
 
     return litellm.completion(**kwargs)
+
+
+def _missing_module_message(exc):
+    """Actionable guidance for a ModuleNotFoundError (hotfix 1.0.1).
+
+    The raw "No module named 'litellm'" told the owner nothing about what
+    to DO. Name the missing module and spell out the fix: install the
+    requirements into the SAME virtual environment the app is launched
+    from, then start the app again from that window.
+    """
+    name = getattr(exc, "name", "") or ""
+    if not name:
+        match = re.search(r"No module named '([^']+)'", str(exc))
+        name = match.group(1) if match else "litellm"
+    return (
+        f"Setup incomplete: the '{name}' package is not installed in this "
+        "Python environment. Close this wizard, open PowerShell in the app "
+        "folder, activate the virtual environment "
+        "(.venv\\Scripts\\activate), run: pip install -r requirements-gui.txt "
+        "— then start the app again from that same window."
+    )
 
 
 def test_brain_connection(settings, *, completion=None):
@@ -58,8 +81,15 @@ def test_brain_connection(settings, *, completion=None):
     completion = completion or default_completion
     try:
         response = completion(**kwargs)
+    except ModuleNotFoundError as exc:
+        # The probe's own import failed (package missing from THIS Python
+        # environment) — that is a setup problem, not a provider rejection.
+        return False, _missing_module_message(exc)
     except Exception as exc:  # noqa: BLE001 - surface the provider's own words
-        return False, f"{provider.display_name} call failed: {type(exc).__name__}: {exc}"
+        detail = str(exc)
+        if len(detail) > 300:
+            detail = detail[:300] + "…"
+        return False, f"{provider.display_name} call failed: {type(exc).__name__}: {detail}"
     try:
         text = (response.choices[0].message.content or "").strip()
     except Exception:  # noqa: BLE001

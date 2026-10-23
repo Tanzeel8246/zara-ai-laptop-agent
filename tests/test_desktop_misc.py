@@ -90,6 +90,49 @@ def test_brain_probe_surfaces_provider_error():
     assert "401 invalid key" in message
 
 
+def test_brain_probe_missing_litellm_is_actionable():
+    """Hotfix 1.0.1: a missing package must read as setup guidance, not a
+    raw ModuleNotFoundError traceback-style string."""
+    settings = Settings(brain="api", api_provider="gemini",
+                        provider_model="gemini-2.5-pro", gemini_key="k")
+
+    def missing(**kwargs):
+        raise ModuleNotFoundError("No module named 'litellm'", name="litellm")
+
+    ok, message = probe_brain(settings, completion=missing)
+    assert ok is False
+    assert "Setup incomplete" in message
+    assert "'litellm'" in message
+    assert "pip install -r requirements-gui.txt" in message
+    assert ".venv" in message
+    assert "ModuleNotFoundError" not in message
+
+
+def test_brain_probe_missing_module_names_whatever_is_missing():
+    settings = Settings(brain="api", api_provider="openai",
+                        provider_model="gpt-5", openai_key="k")
+
+    def missing(**kwargs):
+        raise ModuleNotFoundError("No module named 'some_lib'", name="some_lib")
+
+    ok, message = probe_brain(settings, completion=missing)
+    assert ok is False
+    assert "'some_lib'" in message
+
+
+def test_brain_probe_truncates_long_provider_errors():
+    settings = Settings(brain="api", api_provider="openai",
+                        provider_model="gpt-5", openai_key="k")
+
+    def boom(**kwargs):
+        raise RuntimeError("x" * 1000)
+
+    ok, message = probe_brain(settings, completion=boom)
+    assert ok is False
+    assert len(message) < 400
+    assert message.endswith("…")
+
+
 def test_brain_probe_custom_passes_base_url():
     settings = Settings(brain="api", api_provider="custom",
                         custom_api_base="http://localhost:11434/v1",

@@ -8,7 +8,17 @@ bound to agent.licensing, not to the Settings model. Re-runnable at any
 time from the tray menu.
 """
 
-from PySide6.QtWidgets import QLabel, QVBoxLayout, QWizard, QWizardPage, QCheckBox
+from PySide6.QtCore import Qt
+from PySide6.QtWidgets import (
+    QCheckBox,
+    QFrame,
+    QLabel,
+    QScrollArea,
+    QVBoxLayout,
+    QWidget,
+    QWizard,
+    QWizardPage,
+)
 
 from desktop import diagnostics
 from desktop.fields import BehaviourFields, BrainFields, GeneralFields, TransportsFields
@@ -16,8 +26,24 @@ from desktop.license_panel import LicensePanel
 from desktop.settings_model import Settings
 
 
+def _scroll_area(widget):
+    """Wrap a page body in a borderless vertical scroll area (hotfix 1.0.1).
+
+    Wizard pages used to lay their content out directly, so on shorter
+    windows the bottom of a page — the WhatsApp QR included — was simply
+    cut off with no way to reach it. Every page body now scrolls; the
+    page title/subtitle stay native to the wizard, outside the area.
+    """
+    area = QScrollArea()
+    area.setWidgetResizable(True)
+    area.setFrameShape(QFrame.Shape.NoFrame)
+    area.setHorizontalScrollBarPolicy(Qt.ScrollBarPolicy.ScrollBarAlwaysOff)
+    area.setWidget(widget)
+    return area
+
+
 class _FieldsPage(QWizardPage):
-    """A wizard page hosting one reusable fields widget."""
+    """A wizard page hosting one reusable fields widget, scrollable."""
 
     fields_factory = None  # set by subclasses
 
@@ -27,8 +53,17 @@ class _FieldsPage(QWizardPage):
         if subtitle:
             self.setSubTitle(subtitle)
         self.fields = self.fields_factory()
+        self.scroll = _scroll_area(self.fields)
         layout = QVBoxLayout(self)
-        layout.addWidget(self.fields)
+        layout.addWidget(self.scroll)
+
+    def swap_fields(self, fields):
+        """Replace the hosted fields widget (injectable-probe pages)."""
+        old = self.fields
+        self.fields = fields
+        self.scroll.takeWidget()  # detaches `old` from the scroll area
+        self.scroll.setWidget(fields)
+        old.deleteLater()
 
     def initializePage(self):
         self.fields.load(self.wizard().settings)
@@ -71,7 +106,7 @@ class LicensePage(QWizardPage):
         self.setSubTitle("Your trial, your key, this computer")
         layout = QVBoxLayout(self)
         self.panel = LicensePanel(client=license_client)
-        layout.addWidget(self.panel)
+        layout.addWidget(_scroll_area(self.panel))
 
     def initializePage(self):
         self.panel.refresh()
@@ -85,10 +120,7 @@ class BrainPage(_FieldsPage):
         # _FieldsPage built the widget with the default factory; rebuild with
         # the injectable probe when one was supplied.
         if completion is not None:
-            old = self.fields
-            self.fields = BrainFields(completion=completion)
-            self.layout().replaceWidget(old, self.fields)
-            old.deleteLater()
+            self.swap_fields(BrainFields(completion=completion))
 
 
 class TransportsPage(_FieldsPage):
@@ -98,10 +130,7 @@ class TransportsPage(_FieldsPage):
             "Enable only the apps you want — each one can be skipped and set up later",
         )
         if pairing_factory is not None:
-            old = self.fields
-            self.fields = TransportsFields(pairing_factory=pairing_factory)
-            self.layout().replaceWidget(old, self.fields)
-            old.deleteLater()
+            self.swap_fields(TransportsFields(pairing_factory=pairing_factory))
 
     fields_factory = TransportsFields
 
@@ -118,14 +147,17 @@ class FinishPage(QWizardPage):
         super().__init__()
         self.setTitle("Ready")
         self.setSubTitle("Review, then start your assistant")
-        layout = QVBoxLayout(self)
+        body = QWidget()
+        body_layout = QVBoxLayout(body)
         self.summary = QLabel("")
         self.summary.setWordWrap(True)
-        layout.addWidget(self.summary)
+        body_layout.addWidget(self.summary)
         self.start_now = QCheckBox("Start the agent when I finish")
         self.start_now.setChecked(True)
-        layout.addWidget(self.start_now)
-        layout.addStretch(1)
+        body_layout.addWidget(self.start_now)
+        body_layout.addStretch(1)
+        layout = QVBoxLayout(self)
+        layout.addWidget(_scroll_area(body))
 
     def initializePage(self):
         wizard = self.wizard()

@@ -1,5 +1,24 @@
 # Changelog — CodeHubb Assistant
 
+## 1.0.1 — 2026-10-23
+
+First-run hotfix from the owner's Windows testing of 1.0.0.
+
+- **Wizard pages scroll.** Page bodies are wrapped in scroll areas
+  (Welcome, License, Brain, Chats, Behaviour, Ready), so on shorter
+  windows nothing is cut off any more — most importantly the WhatsApp
+  pairing QR, which is now also scaled to fit the page (max 320×320).
+- **Brain "Test connection" explains a missing package.** If the
+  Python environment the app runs from lacks `litellm` (or any other
+  module), the test now says the setup is incomplete and gives the fix
+  (activate `.venv`, `pip install -r requirements-gui.txt`, relaunch
+  from the same window) instead of a raw `ModuleNotFoundError`.
+  Genuine provider errors are truncated to ~300 characters.
+- **Model field guidance.** The field shows the provider's exact
+  default model ID as a placeholder plus a hint that an exact ID is
+  required; an empty field falls back to the provider's default on
+  apply/Test instead of saving a blank model.
+
 ## 1.0.0 — 2026-10-23
 
 First commercial release: the personal "Zara" laptop agent rebuilt as
