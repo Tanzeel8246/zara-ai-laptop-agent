@@ -1,5 +1,17 @@
 # Changelog — CodeHubb Assistant
 
+## 1.0.2 — 2026-10-23
+
+- **WhatsApp bridge packages install themselves.** On first pairing
+  (wizard) and on the agent's first start, a missing `sidecar`
+  `node_modules` is now installed automatically via `npm install` —
+  nobody is sent to a terminal again. The wizard shows an
+  "Installing WhatsApp bridge packages — first time only…" state with
+  a working Stop; the agent logs the attempt loudly. The manual
+  `npm install` command survives only as the fallback text when npm
+  cannot be found or the automatic install fails (with the tail of
+  npm's own output attached).
+
 ## 1.0.1 — 2026-10-23
 
 First-run hotfix from the owner's Windows testing of 1.0.0.

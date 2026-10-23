@@ -27,6 +27,7 @@ import sys
 import time
 from pathlib import Path
 
+from .. import sidecar_setup
 from ..config import CONFIG, ROOT
 from . import IncomingMessage
 
@@ -112,6 +113,7 @@ class WhatsAppTransport:
         self._pending = {}        # chat_jid -> asyncio.Future (YES/NO confirmation)
         self._proc = None
         self._stopped = False
+        self._packages_attempted = False   # npm auto-install: once per process
 
     # ------------------------------------------------------------------ bridge
 
@@ -229,6 +231,31 @@ class WhatsAppTransport:
             with contextlib.suppress(Exception):
                 self._proc.terminate()
 
+    async def _ensure_sidecar_packages(self, node):
+        """First run only: install the sidecar's npm packages ourselves.
+
+        The owner must never be sent to a terminal for this. Attempted
+        ONCE per process; the blocking npm run happens on a thread so
+        the event loop stays free. Returns True when the packages are
+        in place (already were, or the install just succeeded).
+        """
+        if sidecar_setup.packages_installed(SIDECAR_DIR):
+            return True
+        if self._packages_attempted:
+            return False
+        self._packages_attempted = True
+        print("[whatsapp] Installing the WhatsApp bridge packages (first run) — "
+              "this can take a couple of minutes…")
+        ok, detail = await asyncio.to_thread(
+            sidecar_setup.install_packages, SIDECAR_DIR, node
+        )
+        if ok:
+            print(f"[whatsapp] {detail}")
+        else:
+            print(f"[whatsapp] Automatic package install failed: {detail}",
+                  file=sys.stderr)
+        return ok
+
     async def _supervise(self):
         # Phase 5: Node resolution is shared with the setup wizard
         # (desktop/node_bootstrap.py) — NODE_BINARY override, system
@@ -248,10 +275,11 @@ class WhatsAppTransport:
                 file=sys.stderr,
             )
             return
-        if not (SIDECAR_DIR / "node_modules").exists():
+        if not await self._ensure_sidecar_packages(node):
             print(
-                f"\n  [whatsapp] The sidecar's packages are not installed yet ({SIDECAR_DIR}). "
-                "Run `npm install` inside the sidecar folder once, then restart. "
+                f"\n  [whatsapp] The sidecar's packages are not installed ({SIDECAR_DIR}) "
+                "and the automatic install did not succeed. "
+                + sidecar_setup.manual_install_hint(SIDECAR_DIR) + " "
                 "WhatsApp transport DISABLED for this run; other transports are unaffected.\n",
                 file=sys.stderr,
             )
