@@ -196,7 +196,7 @@ def test_vision_warning_for_deepseek():
 
 def test_vision_warning_empty_for_gemini():
     settings = Settings(brain="api", api_provider="gemini",
-                        provider_model="gemini-2.5-pro", gemini_key="k")
+                        provider_model="gemini-3.8-flash", gemini_key="k")
     assert settings.vision_warning() == ""
 
 

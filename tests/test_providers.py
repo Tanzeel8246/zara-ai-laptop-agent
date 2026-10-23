@@ -38,7 +38,7 @@ def test_every_provider_has_key_and_display():
     [
         ("anthropic", "claude-opus-5", "anthropic/claude-opus-5"),
         ("openai", "gpt-5", "openai/gpt-5"),
-        ("gemini", "gemini-2.5-pro", "gemini/gemini-2.5-pro"),
+        ("gemini", "gemini-3.8-flash", "gemini/gemini-3.8-flash"),
         ("deepseek", "deepseek-chat", "deepseek/deepseek-chat"),
         ("custom", "llama-3.3-70b-versatile", "openai/llama-3.3-70b-versatile"),
         # already-prefixed strings pass through untouched
@@ -53,7 +53,20 @@ def test_build_model_string(provider_id, model, expected):
 
 def test_default_model_used_when_blank():
     assert build_model_string(get_provider("anthropic"), "") == "anthropic/claude-opus-5"
+    assert build_model_string(get_provider("gemini"), "") == "gemini/gemini-3.8-flash"
     assert build_model_string(get_provider("deepseek"), "") == "deepseek/deepseek-chat"
+
+
+def test_gemini_default_is_callable_by_new_users():
+    # Hotfix 1.0.8: Google retired the Gemini 2.5 family for accounts that
+    # never used it ("no longer available to new users", 404) — seen live
+    # on the owner's machine against the old gemini-2.5-pro default. The
+    # default must stay on a current, free-tier ID; if Google retires
+    # this one too, move the pin here AND in the registry together.
+    gemini = get_provider("gemini")
+    assert gemini.default_model == "gemini-3.8-flash"
+    assert gemini.supports_tools is True
+    assert gemini.supports_vision is True
 
 
 def test_model_level_vision():
