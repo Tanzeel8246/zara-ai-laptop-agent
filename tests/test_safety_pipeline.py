@@ -115,7 +115,12 @@ async def test_unknown_tool_reported_not_executed(tmp_path, brain_label):
 async def test_audit_log_records_decisions(tmp_path, brain_label, monkeypatch):
     monkeypatch.setattr(CONFIG, "confirm_risky", True)
     executor = make_executor(tmp_path, brain_label, [])
+    # Two SEPARATE instructions = two turns (Hotfix 1.0.10 brackets them,
+    # as both brains now do): a refusal in turn 1 must not latch turn 2.
+    executor.begin_turn()
     await executor.execute("run_powershell", DESTRUCTIVE, FakeChannel(confirm_answer=False))
+    executor.end_turn()
+    executor.begin_turn()
     await executor.execute("run_powershell", BENIGN, FakeChannel())
 
     lines = (tmp_path / "audit.jsonl").read_text(encoding="utf-8").strip().splitlines()

@@ -154,6 +154,14 @@ class ApiBrain:
             "messages": [],
             "tools": TOOLS,
             "max_tokens": 4096,
+            # Hotfix 1.0.10: bound every provider call. With neither set,
+            # LiteLLM's fallbacks governed — a 6000-second request timeout
+            # and library-internal retries — so during the owner's first
+            # live run a Gemini 503 storm could stall a turn invisibly for
+            # many minutes. A failed call now fails, visibly, in bounded
+            # time, and the error path reports it to the chat.
+            "timeout": 120,
+            "num_retries": 2,
         }
         key = CONFIG.provider_key()
         if not key and self.provider.id == "custom":
@@ -170,6 +178,9 @@ class ApiBrain:
             await chan.send_text("I'm still working on the previous instruction. Send `/stop` to cancel it.")
             return
         self.busy.add(key)
+        # Hotfix 1.0.10: bracket the turn so a refused confirmation latches
+        # (SafetyPipeline) — no repeat prompts, no equivalent-action bypass.
+        self.executor.begin_turn()
         try:
             await self._run(key, user_text, chan)
         except asyncio.CancelledError:
@@ -179,6 +190,7 @@ class ApiBrain:
             traceback.print_exc()
             await chan.send_text(f"Agent error: `{type(exc).__name__}: {exc}`")
         finally:
+            self.executor.end_turn()
             self.busy.discard(key)
 
     async def _run(self, key, user_text, chan):

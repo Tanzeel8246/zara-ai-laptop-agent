@@ -63,12 +63,18 @@ async def test_forget_fact_via_executor_asks_confirmation(store, tmp_path, monke
         SafetyPipeline(AuditLog(tmp_path / "audit.jsonl")), brain_label="test"
     )
 
+    # Two separate instructions = two turns (Hotfix 1.0.10 brackets them,
+    # as both brains now do): refused in turn 1, asked again and approved
+    # in turn 2 — the latch is per-turn, so the approval must still work.
+    executor.begin_turn()
     denied_chan = FakeChannel(confirm_answer=False)
     outcome = await executor.execute("forget_fact", {"key": "old_fact"}, denied_chan)
     assert outcome.is_error and "DENIED" in outcome.text
     assert store.get_fact("old_fact") == "gone soon"      # still there
     assert len(denied_chan.confirm_calls) == 1
+    executor.end_turn()
 
+    executor.begin_turn()
     ok_chan = FakeChannel(confirm_answer=True)
     outcome = await executor.execute("forget_fact", {"key": "old_fact"}, ok_chan)
     assert not outcome.is_error

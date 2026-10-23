@@ -14,7 +14,10 @@ Behaviour preserved from the original:
   - CONFIRM_RISKY off  -> risky actions run immediately, no prompt (as before).
   - CONFIRM_RISKY on   -> classify() decides; the owner approves/denies through
                           the transport channel; a denial returns the exact
-                          "DENIED: ..." tool result the original produced.
+                          "DENIED: ..." tool result the original produced —
+                          and (Hotfix 1.0.10) latches for the rest of the turn,
+                          so neither a repeat nor a state-changing equivalent
+                          can be prompted for or executed after a refusal.
   - Tool progress notes: the original brains disagreed (API brain narrated
     every call; SDK brain only under SHOW_TOOL_CALLS). The executor takes a
     per-brain `announce` option so each brain keeps its own original default.
@@ -39,6 +42,37 @@ DENIED_TEXT = (
     "DENIED: the owner refused this action. Do not retry it or attempt "
     "an equivalent action another way. Ask them what to do instead."
 )
+
+# Tools whose execution changes the state of the machine, the owner's
+# accounts, or stored data (Hotfix 1.0.10). After the owner refuses ANY
+# confirmation in a turn, every further call to one of these is refused
+# for the rest of that turn — mechanically, by the pipeline, not by
+# asking the model to behave. A refusal the brain could route around
+# (write_file refused -> run_powershell Set-Content, which classify()
+# does not flag) would not be a refusal at all; the owner's first live
+# run proved the model does exactly that. Read-only tools (list_dir,
+# read_file, screenshot, system_status, ...) stay available so the turn
+# can still observe and report truthfully.
+STATE_CHANGING_TOOLS = {
+    "write_file", "delete_path", "run_powershell", "kill_process",
+    "registry_set", "forget_fact", "remember_fact",
+    "browser_open", "browser_close", "browser_click", "browser_type",
+    "power_action", "click", "drag", "type_text", "press_keys",
+    "close_window", "open_app", "open_url", "open_whatsapp", "open_claude",
+    "whatsapp_open_chat", "whatsapp_send",
+    "send_file_to_discord", "send_screenshot_file",
+    "schedule_task", "cancel_schedule",
+    "network_repair", "wifi_add_network", "free_ram",
+    "media_control", "clipboard",
+}
+
+
+def denial_fingerprint(name, args):
+    """Stable identity of one prospective tool call, for the turn latch."""
+    try:
+        return (name, json.dumps(args or {}, sort_keys=True, default=str))
+    except (TypeError, ValueError):
+        return (name, repr(args))
 
 
 def truncate(text, limit):
@@ -99,17 +133,66 @@ class AuditLog:
 
 
 class SafetyPipeline:
-    """classify -> confirm -> audit, for one prospective tool call."""
+    """classify -> confirm -> audit, for one prospective tool call.
+
+    Hotfix 1.0.10 adds the turn-scoped DENIAL LATCH. check() used to be
+    stateless: a refusal (an explicit "no", an unanswered prompt timing
+    out, a prompt that could not be delivered) only produced DENIED_TEXT
+    for the model, and nothing stopped the brain's loop from proposing
+    the same call again — burning another full confirmation timeout per
+    attempt — or an equivalent state-changing call the classifier does
+    not flag. Now a refusal is recorded by begin/end-turn bracketing
+    (the brains call them around every turn): repeats of the refused
+    call and every further state-changing call in the same turn are
+    refused immediately, without re-prompting and without executing.
+    Timeout IS refusal: chan.confirm() returning False for any reason
+    latches exactly the same way.
+    """
 
     def __init__(self, audit=None):
         self.audit = audit or AuditLog()
+        self._denied_fingerprints = set()
+        self._turn_denied = False
+
+    # ------------------------------------------------------ turn latch --
+
+    def begin_turn(self):
+        """Start a fresh turn: any previous turn's refusals are forgotten."""
+        self._denied_fingerprints = set()
+        self._turn_denied = False
+
+    def end_turn(self):
+        """End a turn: the latch never leaks into the next instruction."""
+        self.begin_turn()
+
+    def _record_denial(self, name, args):
+        self._denied_fingerprints.add(denial_fingerprint(name, args))
+        self._turn_denied = True
+
+    def _latched_denial(self, *, brain, name, args):
+        """This turn's earlier refusal, applied mechanically. None = no latch."""
+        if denial_fingerprint(name, args) in self._denied_fingerprints or (
+            self._turn_denied and name in STATE_CHANGING_TOOLS
+        ):
+            self.audit.record(
+                brain=brain, tool=name, args_preview=preview_args(args),
+                decision="denied", confirmed=False,
+            )
+            return ToolOutcome(DENIED_TEXT, is_error=True)
+        return None
+
+    # ------------------------------------------------------------- check --
 
     async def check(self, *, brain, name, args, chan):
         """Return None if the call may proceed, else a denial ToolOutcome."""
+        latched = self._latched_denial(brain=brain, name=name, args=args)
+        if latched is not None:
+            return latched
         needs_confirm, reason = classify(name, args)
         if needs_confirm and CONFIG.confirm_risky:
             if chan is None:
                 # Nobody to ask: the safe answer is no.
+                self._record_denial(name, args)
                 self.audit.record(
                     brain=brain, tool=name, args_preview=preview_args(args),
                     decision="denied", confirmed=True,
@@ -121,6 +204,7 @@ class SafetyPipeline:
                 decision="allowed" if approved else "denied", confirmed=True,
             )
             if not approved:
+                self._record_denial(name, args)
                 return ToolOutcome(DENIED_TEXT, is_error=True)
             return None
         self.audit.record(
@@ -144,6 +228,14 @@ class ToolExecutor:
         self.handlers = handlers if handlers is not None else HANDLERS
         # announce: True = note every call, False = never, None = follow CONFIG.show_tool_calls.
         self.announce = announce
+
+    def begin_turn(self):
+        """Bracket one brain turn (Hotfix 1.0.10): resets the denial latch."""
+        self.pipeline.begin_turn()
+
+    def end_turn(self):
+        """End the bracket: refusals never leak into the next instruction."""
+        self.pipeline.end_turn()
 
     async def execute(self, name, args, chan, *, show_images_to_user=None):
         """Run one tool. `show_images_to_user` overrides the tool's own

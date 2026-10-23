@@ -1,5 +1,37 @@
 # Changelog — CodeHubb Assistant
 
+## 1.0.10 — 2026-10-23
+
+- **A refused confirmation is now FINAL for the rest of the turn —
+  mechanically, not by asking the model to behave.** Found on the
+  owner's first live Telegram run: a folder-create task finished about
+  ten minutes late with the write executed, although no approval was
+  ever given. The safety check used to be stateless — a refusal (or an
+  unanswered prompt timing out) only returned a "DENIED: …" text to the
+  model, which could then re-propose the same action (another full
+  3-minute prompt each time) or an equivalent the classifier does not
+  flag (write_file refused → the same write via a shell command). The
+  pipeline now latches a refusal for the remainder of the turn: repeats
+  of the refused call and every further state-changing tool call are
+  refused immediately, without re-prompting and without executing.
+  Read-only tools still work, so the assistant can observe and report;
+  the latch resets with the next instruction. Both brains bracket
+  their turns, so the guarantee holds on either engine. An unanswered
+  confirmation still counts as a refusal — now a final one.
+- **Confirmation taps and /cancel can no longer be starved.** The
+  Telegram library's default processes updates strictly one at a
+  time; any slow update handler (a voice note transcribing, say)
+  queued the owner's taps behind it. Update handling is now concurrent
+  (the task queue still serialises the work itself).
+- **Provider calls are time- and retry-bounded.** Each model call now
+  carries an explicit 120-second timeout and at most 2 retries, instead
+  of library fallbacks (a 6000-second request timeout) that let a
+  provider outage stall a turn invisibly for many minutes. A failing
+  call now fails in bounded time and is reported in the chat.
+- **A failed task is never silent.** If a task's runner raises, the
+  queue now also sends the "Agent error: …" line to the chat before
+  recording the failure, instead of only writing it to the task store.
+
 ## 1.0.9 — 2026-10-23
 
 - **The app is visible when it runs: a control window at launch.**

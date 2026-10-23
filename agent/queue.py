@@ -248,6 +248,14 @@ class TaskQueue:
                 task_id, "cancelled", result_summary="Cancelled by the owner."
             )
         except Exception as exc:  # noqa: BLE001 - one bad task must not kill the worker
+            # Hotfix 1.0.10: a failure the user never hears about is a
+            # silent failure. Brains report their own errors, but anything
+            # raised around them (voice reply, typing indicator, a store
+            # hiccup mid-turn) used to land ONLY in this store row. Tell
+            # the chat too — best-effort, exactly like the brain's own
+            # "Agent error:" line — then record the failure as before.
+            with contextlib.suppress(Exception):
+                await chan.send_text(f"Agent error: `{type(exc).__name__}: {exc}`")
             self.store.set_task_status(
                 task_id, "failed",
                 result_summary=f"{type(exc).__name__}: {exc}"[:SUMMARY_LIMIT],
