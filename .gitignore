@@ -6,6 +6,7 @@
 # runtime
 .venv/
 .runtime/
+node_modules/
 __pycache__/
 *.pyc
 *.pyo
