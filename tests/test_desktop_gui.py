@@ -107,3 +107,94 @@ def test_wizard_pairing_panel_with_fake_session(qapp, tmp_path):
     assert fields.qr_label.pixmap() is not None
     fields.stop_pairing()
     assert fake.stopped is True
+
+
+# ------------------------------------------------------- hotfix 1.0.1
+
+def test_wizard_page_bodies_are_scrollable(qapp, tmp_path):
+    """Hotfix 1.0.1: every wizard page body lives in a QScrollArea, so a
+    short window can no longer cut content off with no way to reach it."""
+    from PySide6.QtWidgets import QScrollArea
+
+    from desktop.settings_model import Settings
+    from desktop.wizard import SetupWizard
+
+    wizard = SetupWizard(Settings(), env_path=tmp_path / ".env")
+    try:
+        for page_id in wizard.pageIds():
+            page = wizard.page(page_id)
+            areas = page.findChildren(QScrollArea)
+            assert areas, f"page {page_id} ({page.title()}) has no scroll area"
+        # fields pages: the scroll area hosts exactly the fields widget
+        for page_id in (0, 2, 3, 4):
+            page = wizard.page(page_id)
+            assert page.scroll.widget() is page.fields
+        # license page: the panel itself is the scrolled widget
+        license_page = wizard.page(1)
+        assert license_page.findChild(QScrollArea).widget() is license_page.panel
+    finally:
+        wizard.close()
+
+
+def test_brain_fields_model_guidance_and_fallback(qapp):
+    """Hotfix 1.0.1 (Bug 3): switching provider updates the model field's
+    placeholder to the registry default ID, a hint explains the ID must be
+    exact, and an empty field falls back to that default on apply (which is
+    also the path Test connection takes)."""
+    from desktop.fields import BrainFields
+    from desktop.settings_model import Settings
+
+    fields = BrainFields()
+    assert "Exact model ID" in fields.model_hint.text()
+
+    def select(provider_id):
+        for index in range(fields.choice.count()):
+            mode, pid = fields.choice.itemData(index)
+            if mode == "api" and pid == provider_id:
+                fields.choice.setCurrentIndex(index)
+                return
+        raise AssertionError(f"provider {provider_id} not in combo")
+
+    select("gemini")
+    assert fields.model.placeholderText() == "gemini-2.5-pro"
+    select("openai")
+    assert fields.model.placeholderText() == "gpt-5"
+
+    select("gemini")
+    fields.model.setText("")  # owner cleared it — apply must not save blank
+    snapshot = Settings()
+    fields.apply(snapshot)
+    assert snapshot.api_provider == "gemini"
+    assert snapshot.provider_model == "gemini-2.5-pro"
+
+
+def test_qr_label_caps_pixmap_at_320(qapp):
+    """Hotfix 1.0.1: a realistic (long) WhatsApp payload renders a huge PNG;
+    the label must scale it down to at most 320x320 so it can be scanned."""
+    from desktop.fields import TransportsFields
+    from desktop.pairing import PairingStatus
+
+    # realistic shape/length of a WhatsApp Web pairing payload
+    long_payload = (
+        "2@zKx9Qp2LmN4vR8sT1wY6bH3jF5dA7gE0cXuIoPqWrTyUiOpAsDfGhJkLzXcVbNm"
+        "QwErTyUiOp1234567890+/=,aBcDeFgHiJkLmNoPqRsTuVwXyZ0123456789abcdef"
+        "FEDCBA9876543210zyxwvutsrqponmlkjihgfedcba,923001234567,ABCD1234"
+    )
+
+    class FakeSession:
+        def start(self):
+            return PairingStatus("waiting_qr", qr=long_payload, detail="scan")
+
+        def poll(self):
+            return PairingStatus("waiting_qr", qr=long_payload, detail="scan")
+
+        def stop(self):
+            pass
+
+    fields = TransportsFields(pairing_factory=FakeSession)
+    fields.start_pairing()
+    pixmap = fields.qr_label.pixmap()
+    assert pixmap is not None and not pixmap.isNull()
+    assert pixmap.width() <= 320
+    assert pixmap.height() <= 320
+    fields.stop_pairing()

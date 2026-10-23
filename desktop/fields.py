@@ -94,6 +94,15 @@ class BrainFields(QWidget):
         self.model = QLineEdit()
         layout.addWidget(self.model_label)
         layout.addWidget(self.model)
+        # Hotfix 1.0.1: a display-style name ("Gemini 3.8 Flash") can never
+        # work here — the provider needs the exact model ID. Say so, right
+        # under the field, and mirror the ID in the placeholder.
+        self.model_hint = QLabel(
+            "Exact model ID — leave the prefilled value unless you know the ID you want."
+        )
+        self.model_hint.setWordWrap(True)
+        self.model_hint.setStyleSheet("color: #6B7280;")
+        layout.addWidget(self.model_hint)
 
         self.vision_warning = QLabel("")
         self.vision_warning.setWordWrap(True)
@@ -130,6 +139,7 @@ class BrainFields(QWidget):
         self.key_label.setVisible(is_api)
         if is_api and provider is not None:
             self.key_label.setText(f"API key ({provider.env_key}):")
+            self.model.setPlaceholderText(provider.default_model)
             if not self.model.text().strip():
                 self.model.setText(provider.default_model)
             self.notes.setText(provider.notes)
@@ -200,8 +210,12 @@ class BrainFields(QWidget):
         settings.brain = mode
         if mode == "api":
             settings.api_provider = provider_id
-            settings.provider_model = self.model.text().strip()
             provider = self._provider()
+            # Hotfix 1.0.1: an empty model field falls back to the
+            # provider's registry default instead of saving a blank model.
+            settings.provider_model = self.model.text().strip() or (
+                provider.default_model if provider is not None else ""
+            )
             if provider is not None:
                 attr = _ATTR_BY_ENV.get(provider.env_key)
                 if attr:
@@ -211,7 +225,12 @@ class BrainFields(QWidget):
         elif mode == "auto":
             settings.api_provider = "anthropic"
             settings.anthropic_key = self.api_key.text().strip()
-            settings.provider_model = self.model.text().strip() or settings.provider_model
+            provider = self._provider()
+            settings.provider_model = (
+                self.model.text().strip()
+                or settings.provider_model
+                or (provider.default_model if provider is not None else "")
+            )
         else:  # subscription
             settings.subscription_model = self.model.text().strip() or "opus"
         return []
@@ -354,6 +373,15 @@ class TransportsFields(QWidget):
             data = pairing.make_qr_png_bytes(status.qr)
             pixmap = QPixmap()
             if pixmap.loadFromData(data):
+                # Hotfix 1.0.1: WhatsApp payloads render as very large PNGs;
+                # cap what the label shows at 320x320 so the code always
+                # fits the page and stays scannable.
+                if pixmap.width() > 320 or pixmap.height() > 320:
+                    pixmap = pixmap.scaled(
+                        320, 320,
+                        Qt.AspectRatioMode.KeepAspectRatio,
+                        Qt.TransformationMode.SmoothTransformation,
+                    )
                 self.qr_label.setPixmap(pixmap)
                 self.qr_label.setMinimumHeight(pixmap.height())
         if status.state in ("connected", "logged_out", "error", "stopped"):
