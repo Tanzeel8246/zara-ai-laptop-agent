@@ -36,6 +36,31 @@ def _bool(name, default="false"):
     return os.getenv(name, default).strip().lower() in ("true", "1", "yes")
 
 
+KNOWN_TRANSPORTS = ("discord", "telegram", "whatsapp")
+
+
+def _transports(raw):
+    """Parse TRANSPORTS (comma list). Blank/unset = discord only, so an
+    existing install behaves exactly as before Phase 1. Unknown names are
+    dropped; at least one known transport always remains."""
+    out = []
+    for part in (raw or "").replace(";", ",").split(","):
+        name = part.strip().lower()
+        if name in KNOWN_TRANSPORTS and name not in out:
+            out.append(name)
+    return out or ["discord"]
+
+
+def _numbers(raw):
+    """Parse a comma list of phone numbers into digit-only strings."""
+    out = set()
+    for part in (raw or "").replace(";", ",").split(","):
+        digits = "".join(ch for ch in part if ch.isdigit())
+        if digits:
+            out.add(digits)
+    return out
+
+
 class Config:
     # ---- product identity (Phase 0: branding lives in config, not in code) ----
     product_name = os.getenv("PRODUCT_NAME", "CodeHubb Assistant").strip() or "CodeHubb Assistant"
@@ -55,6 +80,19 @@ class Config:
     elevenlabs_key = get_secret("ELEVENLABS_API_KEY")
 
     allowed_users = _ids(os.getenv("DISCORD_ALLOWED_USER_IDS"))
+
+    # ---- transports (Phase 1: three optional front ends, one brain) ----
+    # TRANSPORTS is a comma list: discord, telegram, whatsapp. Default keeps
+    # an existing install Discord-only, exactly as before.
+    transports = _transports(os.getenv("TRANSPORTS", "discord"))
+
+    telegram_token = get_secret("TELEGRAM_BOT_TOKEN")
+    telegram_allowed_users = _ids(os.getenv("TELEGRAM_ALLOWED_USER_IDS"))
+
+    # WhatsApp (Route A, Baileys sidecar): no token — pairing is by QR scan.
+    # The allowlist is phone numbers in international format, digits only.
+    whatsapp_allowed_numbers = _numbers(os.getenv("WHATSAPP_ALLOWED_NUMBERS"))
+    wa_bridge_port = _int("WA_BRIDGE_PORT", 17331)
 
     model = os.getenv("AGENT_MODEL", "claude-opus-5").strip() or "claude-opus-5"
 
@@ -184,13 +222,34 @@ def _claude_cli_present():
 def validate():
     """Return a list of human-readable setup problems (empty list = good to go)."""
     problems = []
-    if not CONFIG.discord_token:
-        problems.append("DISCORD_BOT_TOKEN is empty in .env")
-    if not CONFIG.allowed_users:
-        problems.append(
-            "DISCORD_ALLOWED_USER_IDS is empty in .env - without it the agent "
-            "would refuse everyone (or, worse, obey anyone). Put your own Discord user ID there."
-        )
+    enabled = CONFIG.transports
+    if "discord" in enabled:
+        if not CONFIG.discord_token:
+            problems.append("DISCORD_BOT_TOKEN is empty in .env")
+        if not CONFIG.allowed_users:
+            problems.append(
+                "DISCORD_ALLOWED_USER_IDS is empty in .env - without it the agent "
+                "would refuse everyone (or, worse, obey anyone). Put your own Discord user ID there."
+            )
+    if "telegram" in enabled:
+        if not CONFIG.telegram_token:
+            problems.append(
+                "TELEGRAM_BOT_TOKEN is empty in .env - create a bot with @BotFather "
+                "on Telegram and paste its token there, or remove telegram from TRANSPORTS."
+            )
+        if not CONFIG.telegram_allowed_users:
+            problems.append(
+                "TELEGRAM_ALLOWED_USER_IDS is empty in .env - without it the agent "
+                "would refuse everyone (or, worse, obey anyone). Put your own Telegram user ID there "
+                "(message @userinfobot to learn it)."
+            )
+    if "whatsapp" in enabled:
+        if not CONFIG.whatsapp_allowed_numbers:
+            problems.append(
+                "WHATSAPP_ALLOWED_NUMBERS is empty in .env - without it the agent "
+                "would refuse everyone (or, worse, obey anyone). Put your own number "
+                "in international format, digits only (e.g. 923001234567)."
+            )
 
     mode = effective_brain()
     if mode == "api":
