@@ -80,6 +80,78 @@ def test_settings_dialog_and_audit_view_construct(qapp, tmp_path):
     view.close()
 
 
+class _StubMessageBox:
+    """Records QMessageBox.warning calls instead of blocking modally."""
+
+    warnings = []
+
+    @staticmethod
+    def warning(parent, title, text):
+        _StubMessageBox.warnings.append((title, text))
+
+
+def test_wizard_transports_page_blocks_checked_but_empty(qapp, tmp_path, monkeypatch):
+    import desktop.wizard as wizard_module
+    from desktop.settings_model import Settings
+    from desktop.wizard import SetupWizard
+
+    _StubMessageBox.warnings = []
+    monkeypatch.setattr(wizard_module, "QMessageBox", _StubMessageBox)
+
+    wizard = SetupWizard(Settings(), env_path=tmp_path / ".env")
+    try:
+        page = wizard.page(3)  # Transports
+        fields = page.fields
+        # The owner's exact case: WhatsApp is the only transport he wants,
+        # but Discord (default) + Telegram are ticked with empty fields.
+        fields.discord_group.setChecked(True)
+        fields.telegram_group.setChecked(True)
+        fields.whatsapp_group.setChecked(True)
+        fields.whatsapp_numbers.setText("923001234567")
+        assert page.validatePage() is False
+        shown = "\n".join(text for _title, text in _StubMessageBox.warnings)
+        assert "Discord" in shown
+        assert "Telegram" in shown
+        assert "WhatsApp" not in shown  # complete group is not reported
+
+        # Unticking the empty groups (the offered remedy) unblocks the page.
+        _StubMessageBox.warnings = []
+        fields.discord_group.setChecked(False)
+        fields.telegram_group.setChecked(False)
+        assert page.validatePage() is True
+        assert _StubMessageBox.warnings == []
+
+        # Nothing ticked at all is also blocked.
+        fields.whatsapp_group.setChecked(False)
+        assert page.validatePage() is False
+        shown = "\n".join(text for _title, text in _StubMessageBox.warnings)
+        assert "at least one chat app" in shown
+    finally:
+        wizard.close()
+
+
+def test_settings_dialog_save_blocks_checked_but_empty(qapp, tmp_path, monkeypatch):
+    import desktop.settings_dialog as dialog_module
+    from desktop.settings_dialog import SettingsDialog
+    from desktop.settings_model import Settings
+
+    _StubMessageBox.warnings = []
+    monkeypatch.setattr(dialog_module, "QMessageBox", _StubMessageBox)
+
+    dialog = SettingsDialog(Settings(), env_path=tmp_path / ".env")
+    try:
+        fields = dialog.transports_fields
+        fields.discord_group.setChecked(False)
+        fields.telegram_group.setChecked(True)  # token/IDs left empty
+        fields.whatsapp_group.setChecked(False)
+        dialog._save()
+        assert dialog.save_result is None  # refused before saving
+        shown = "\n".join(text for _title, text in _StubMessageBox.warnings)
+        assert "Telegram" in shown
+    finally:
+        dialog.close()
+
+
 def test_wizard_pairing_panel_with_fake_session(qapp, tmp_path):
     from desktop.fields import TransportsFields
     from desktop.pairing import PairingStatus

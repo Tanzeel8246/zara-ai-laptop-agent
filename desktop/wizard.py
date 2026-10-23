@@ -13,6 +13,7 @@ from PySide6.QtWidgets import (
     QCheckBox,
     QFrame,
     QLabel,
+    QMessageBox,
     QScrollArea,
     QVBoxLayout,
     QWidget,
@@ -23,7 +24,7 @@ from PySide6.QtWidgets import (
 from desktop import diagnostics
 from desktop.fields import BehaviourFields, BrainFields, GeneralFields, TransportsFields
 from desktop.license_panel import LicensePanel
-from desktop.settings_model import Settings
+from desktop.settings_model import Settings, transport_problems
 
 
 def _scroll_area(widget):
@@ -133,6 +134,19 @@ class TransportsPage(_FieldsPage):
             self.swap_fields(TransportsFields(pairing_factory=pairing_factory))
 
     fields_factory = TransportsFields
+
+    def validatePage(self):
+        # Hotfix 1.0.4: a switched-on-but-empty chat app used to sail
+        # through the wizard and only bounce the user AFTER it finished
+        # (the "Setup needed first" dialog). Block here instead, naming
+        # the group and the remedy; unchecked groups are ignored.
+        messages = self.fields.apply(self.wizard().settings)
+        self.wizard().notes.extend(messages)
+        problems = transport_problems(self.wizard().settings, require_one=True)
+        if problems:
+            QMessageBox.warning(self, "Chats & messaging", "\n\n".join(problems))
+            return False
+        return True
 
 
 class BehaviourPage(_FieldsPage):
