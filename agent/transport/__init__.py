@@ -20,6 +20,13 @@ IncomingMessage: what a transport hands to its instruction handler — text,
 optional pre-downloaded audio attachment paths, other attachment names, and
 the channel to reply on.
 
+Session keys (Phase 1): several transports can run at once, and two platforms
+can hand us the same numeric chat id. A channel may therefore expose a
+`session_key` (e.g. "telegram:123") that namespaces its `channel_id`; the
+session layer and the safety pipeline key ALL per-conversation state (brain
+memory, jobs, voice bookkeeping) by `session_key_of(channel)`, never by the
+raw channel_id.
+
 Transport: constructed with (brain, helpers) and run()s until stopped.
 The instruction handler signature is:
     async def on_instruction(msg: IncomingMessage) -> None
@@ -58,6 +65,16 @@ class IncomingMessage:
 InstructionHandler = Callable[[IncomingMessage], Awaitable[None]]
 
 
+def session_key_of(channel):
+    """The canonical per-conversation key for a channel.
+
+    Namespaced ("telegram:123") when the channel provides `session_key`,
+    otherwise the raw channel_id (single-transport channels and test fakes).
+    """
+    key = getattr(channel, "session_key", None)
+    return key if key else channel.channel_id
+
+
 class Transport(Protocol):
     name: str
 
@@ -70,4 +87,5 @@ __all__ = [
     "IncomingMessage",
     "InstructionHandler",
     "Transport",
+    "session_key_of",
 ]
