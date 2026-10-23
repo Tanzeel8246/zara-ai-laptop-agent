@@ -1,5 +1,21 @@
 # Changelog — CodeHubb Assistant
 
+## 1.0.8 — 2026-10-23
+
+- **Gemini default moves to a model new users can actually call.**
+  Found live on the owner's machine: Google now answers
+  `gemini-2.5-pro` with a 404 — "no longer available to new users" —
+  because the whole Gemini 2.5 family is closed to accounts that did
+  not already use it. The registry default is now **gemini-3.8-flash**
+  (the wizard placeholder, the Brain page prefill and the empty-field
+  fallback all follow it), and the Gemini notes name the current
+  presets: `gemini-3.8-flash` (free tier), `gemini-3.1-pro-preview`
+  (strongest, but needs a billed Google project — no free tier) and
+  `gemini-3.5-flash-lite` (cheapest, free tier). The Model field stays
+  free text: a saved 2.5 ID still works for anyone Google still serves
+  it to; everyone else should switch — USER_GUIDE's troubleshooting
+  table covers the exact error text.
+
 ## 1.0.7 — 2026-10-23
 
 - **A dead network no longer kills a transport — or the agent.** Found

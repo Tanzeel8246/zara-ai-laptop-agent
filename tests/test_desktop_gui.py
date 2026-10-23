@@ -228,7 +228,7 @@ def test_brain_fields_model_guidance_and_fallback(qapp):
         raise AssertionError(f"provider {provider_id} not in combo")
 
     select("gemini")
-    assert fields.model.placeholderText() == "gemini-2.5-pro"
+    assert fields.model.placeholderText() == "gemini-3.8-flash"
     select("openai")
     assert fields.model.placeholderText() == "gpt-5"
 
@@ -237,7 +237,7 @@ def test_brain_fields_model_guidance_and_fallback(qapp):
     snapshot = Settings()
     fields.apply(snapshot)
     assert snapshot.api_provider == "gemini"
-    assert snapshot.provider_model == "gemini-2.5-pro"
+    assert snapshot.provider_model == "gemini-3.8-flash"
 
 
 def test_qr_label_caps_pixmap_at_320(qapp):

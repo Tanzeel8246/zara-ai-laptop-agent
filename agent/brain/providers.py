@@ -63,10 +63,19 @@ PROVIDERS = {
         display_name="Google (Gemini)",
         litellm_prefix="gemini",
         env_key="GEMINI_API_KEY",
-        default_model="gemini-2.5-pro",
+        default_model="gemini-3.8-flash",
         supports_tools=True,
         supports_vision=True,
-        notes="Full capability: tools + vision on Gemini 2.x.",
+        notes=(
+            "Full capability: tools + vision on the Gemini 3.x family. "
+            "Presets a new account can actually call: gemini-3.8-flash "
+            "(the default; free tier available), gemini-3.1-pro-preview "
+            "(strongest, but needs a billed Google project — no free tier), "
+            "gemini-3.5-flash-lite (cheapest; free tier). The Gemini 2.5 IDs "
+            "were retired by Google for new users: if a test fails with "
+            "\"no longer available to new users\", the saved model ID is one "
+            "of those — switch to one of the IDs above."
+        ),
     ),
     "deepseek": Provider(
         id="deepseek",

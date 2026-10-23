@@ -123,7 +123,7 @@ def test_brain_probe_success_with_fake_completion():
 
 def test_brain_probe_surfaces_provider_error():
     settings = Settings(brain="api", api_provider="gemini",
-                        provider_model="gemini-2.5-pro", gemini_key="k")
+                        provider_model="gemini-3.8-flash", gemini_key="k")
 
     def boom(**kwargs):
         raise RuntimeError("401 invalid key")
@@ -137,7 +137,7 @@ def test_brain_probe_missing_litellm_is_actionable():
     """Hotfix 1.0.1: a missing package must read as setup guidance, not a
     raw ModuleNotFoundError traceback-style string."""
     settings = Settings(brain="api", api_provider="gemini",
-                        provider_model="gemini-2.5-pro", gemini_key="k")
+                        provider_model="gemini-3.8-flash", gemini_key="k")
 
     def missing(**kwargs):
         raise ModuleNotFoundError("No module named 'litellm'", name="litellm")
