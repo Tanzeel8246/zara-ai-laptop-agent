@@ -98,11 +98,22 @@ WhatsApp number) is still empty — either complete it or untick the app.
    @userinfobot to learn it).
 
 **WhatsApp**
-1. Tick WhatsApp and press **Start pairing** — a **QR code** appears.
-2. On your phone: WhatsApp → Settings → **Linked devices** → Link a
-   device → scan the QR.
-3. Add **your own number** (international format, digits only, e.g.
-   `923001234567`) to the allowlist.
+1. Tick WhatsApp and add **your own number** (international format,
+   digits only, e.g. `923001234567`) to the allowlist.
+2. Choose a **pairing method**, then press **Start pairing**:
+   - **QR code** — a QR code appears. On your phone: WhatsApp →
+     Settings → **Linked devices** → Link a device → scan the QR.
+   - **Pairing code** (1.0.6+) — an alternative way to request the same
+     link, worth trying when QR linking is refused. The number of the
+     WhatsApp account you are linking is prefilled from the allowlist
+     (edit it if needed); press **Start pairing** and an 8-character
+     code appears in the wizard. On your phone: WhatsApp → **Linked
+     devices** → Link a device → **Link with phone number instead** →
+     type the code.
+
+Every Start pairing attempt begins from a clean sign-in state: any
+half-finished linking left behind by earlier attempts is cleared first.
+A completed pairing is never cleared.
 
 > ⚠️ **Use a dedicated number for WhatsApp.** This route is an unofficial
 > bridge and WhatsApp can restrict numbers that use it — never your main
@@ -222,7 +233,7 @@ you want to know exactly what your assistant did.
 | Discord bot is online but never replies | **Message Content Intent** is off. Enable it in the developer portal (Wizard page 4 instructions). |
 | "You are not authorised" / messages ignored | Your ID/number is not on that transport's allowlist, or you pasted the bot's ID instead of your own. Re-check in Settings. |
 | WhatsApp QR never appears or pairing fails | The sidecar needs Node.js 18+. The app normally resolves/downloads Node itself; check Diagnostics, then restart the agent. Re-pair from the wizard's Transports page. |
-| The phone says **"Couldn't link device — Try again later"** after scanning the QR | That message comes from WhatsApp itself: after several failed linking attempts it **temporarily pauses linking** for the number. Stop retrying — every extra attempt extends the pause. Wait several hours (ideally overnight), make sure the agent is stopped (tray → Quit), then try **once** more with a fresh QR. Since **1.0.5** the app also fetches the latest WhatsApp protocol version automatically at startup, which removes the outdated-version cause of this refusal. If it still refuses after a quiet night, the number itself may be restricted for unofficial bridges — see [WHATSAPP_DISCLAIMER.md](WHATSAPP_DISCLAIMER.md) and consider a dedicated number. |
+| The phone says **"Couldn't link device — Try again later"** after scanning the QR | That message comes from WhatsApp itself: after several failed linking attempts it **temporarily pauses linking** for the number. Stop retrying — every extra attempt extends the pause. Wait several hours (ideally overnight), make sure the agent is stopped (tray → Quit), then try **once** more with a fresh QR. Since **1.0.5** the app also fetches the latest WhatsApp protocol version automatically at startup, which removes the outdated-version cause of this refusal. You can also try the **Pairing code** method on the Transports page (1.0.6+) — it requests the same link through a different mechanism and is sometimes accepted where the QR scan is refused. It is an alternative, not a guarantee: WhatsApp can decline it too, in which case the working choices are Telegram/Discord, or waiting and retrying later. If it still refuses after a quiet night, the number itself may be restricted for unofficial bridges — see [WHATSAPP_DISCLAIMER.md](WHATSAPP_DISCLAIMER.md) and consider a dedicated number. |
 | Pairing (or the agent) says the WhatsApp bridge packages are installing, or the install failed | First pairing — and the agent's first start — installs the bridge packages **automatically** (1.0.2+); on a slow connection it can take a couple of minutes, so just leave it running. If the automatic install fails, the message shows npm's own error plus the fallback: run `npm install` once inside the `sidecar` folder by hand, then retry. |
 | "The WhatsApp bridge stopped (exit code 1)" during pairing | Read the error lines shown **under** that message (1.0.3+) — they are the bridge's own last output, also saved in `.runtime/whatsapp/pairing.log`. If the message says another copy of the bridge is already running (or the lines mention `EADDRINUSE` / "address already in use"), an earlier bridge is still holding the port: end the `node.exe` process(es) in Task Manager — or restart the PC — then start pairing again. For anything else, send the shown lines (or a Diagnostics report, which includes both WhatsApp logs) with your support message. |
 | WhatsApp stopped working days later | The linked session may have been logged out (or the number restricted — see the disclaimer). Re-pair with the QR; consider a fresh dedicated number. |

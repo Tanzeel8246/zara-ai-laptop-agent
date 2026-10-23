@@ -494,6 +494,160 @@ def test_qr_png_rendering():
     assert len(data) > 200
 
 
+# ------------------------------------- pairing code + pristine auth (1.0.6)
+
+def test_normalize_pairing_number():
+    assert pairing.normalize_pairing_number("+92 300-1234567") == "923001234567"
+    assert pairing.normalize_pairing_number("0092 300 1234567") == "923001234567"
+    assert pairing.normalize_pairing_number("923001234567") == "923001234567"
+    assert pairing.normalize_pairing_number("") == ""
+    assert pairing.normalize_pairing_number(None) == ""
+
+
+def test_format_pairing_code():
+    assert pairing.format_pairing_code("ABCDEFGH") == "ABCD-EFGH"
+    assert pairing.format_pairing_code(" WXYZ1234 ") == "WXYZ-1234"
+    assert pairing.format_pairing_code("SHORT") == "SHORT"
+    assert pairing.format_pairing_code("") == ""
+
+
+def _pairing_with_env(tmp_path, proc):
+    (tmp_path / "sidecar" / "node_modules").mkdir(parents=True)
+    captured = {}
+
+    def factory(cmd, **kw):
+        captured.update(kw)
+        return proc
+
+    session = pairing.PairingSession(root=tmp_path, node="node", popen=factory)
+    return session, captured
+
+
+def test_pairing_code_mode_env_and_status_merge(tmp_path):
+    proc = FakeSidecarProc()
+    session, captured = _pairing_with_env(tmp_path, proc)
+    status = session.start(method="code", number="+92 300-1234567")
+    env = captured["env"]
+    assert env["WA_PAIRING_METHOD"] == "code"
+    assert env["WA_PAIRING_NUMBER"] == "923001234567"
+    assert env["WA_PAIRING_CODE_FILE"].endswith("pairing-code.txt")
+    # nothing yet: no code file, no QR -> still starting
+    assert status.state == "starting"
+    assert status.pairing_code == ""
+    # the sidecar writes the code -> poll merges it
+    session.code_file.write_text("ABCD1234", encoding="utf-8")
+    status = session.poll()
+    assert status.state == "waiting_code"
+    assert status.pairing_code == "ABCD1234"
+    assert "Link with phone number instead" in status.detail
+    session.stop()
+
+
+def test_pairing_code_mode_falls_back_to_qr_status(tmp_path):
+    # the sidecar could not get a code (it logs why) but wrote a QR:
+    # poll must surface the QR exactly as the plain QR flow would
+    proc = FakeSidecarProc()
+    session = _pairing(tmp_path, proc)
+    session.start(method="code", number="923001234567")
+    session.qr_file.write_text("QR-PAYLOAD-9", encoding="utf-8")
+    status = session.poll()
+    assert status.state == "waiting_qr"
+    assert status.qr == "QR-PAYLOAD-9"
+    assert status.pairing_code == ""
+    session.stop()
+
+
+def test_pairing_code_stale_file_is_never_shown(tmp_path):
+    # a code left by an earlier run is unlinked at spawn (the same
+    # staleness discipline as qr.txt)
+    proc = FakeSidecarProc()
+    session = _pairing(tmp_path, proc)
+    session.code_file.parent.mkdir(parents=True, exist_ok=True)
+    session.code_file.write_text("STALE123", encoding="utf-8")
+    status = session.start(method="code", number="923001234567")
+    assert status.pairing_code == ""
+    assert not session.code_file.exists()
+    assert session.poll().pairing_code == ""
+    session.stop()
+
+
+def test_pairing_qr_mode_ignores_code_file(tmp_path):
+    proc = FakeSidecarProc()
+    session, captured = _pairing_with_env(tmp_path, proc)
+    session.start()  # default QR mode, exactly as before 1.0.6
+    assert captured["env"]["WA_PAIRING_METHOD"] == "qr"
+    session.code_file.write_text("ABCD1234", encoding="utf-8")
+    status = session.poll()
+    assert status.pairing_code == ""
+    assert status.state == "starting"
+    session.stop()
+
+
+def _seed_auth(session, creds_text, extra_files=("session-1.json",)):
+    session.auth_dir.mkdir(parents=True, exist_ok=True)
+    (session.auth_dir / "creds.json").write_text(creds_text, encoding="utf-8")
+    for name in extra_files:
+        (session.auth_dir / name).write_text("junk", encoding="utf-8")
+
+
+def test_pairing_start_clears_unregistered_auth(tmp_path):
+    proc = FakeSidecarProc()
+    session = _pairing(tmp_path, proc)
+    _seed_auth(
+        session,
+        '{"registered": false, "me": null}',
+        extra_files=("session-1.json", "app-state-sync-key-x.json"),
+    )
+    nested = session.auth_dir / "subdir"
+    nested.mkdir()
+    (nested / "leftover.json").write_text("junk", encoding="utf-8")
+    session.start()
+    # every trace of the never-completed sign-in is gone
+    assert list(session.auth_dir.iterdir()) == []
+    # and the clearing is on the record in pairing.log
+    log = session.log_file.read_text(encoding="utf-8")
+    assert "cleared any partial sign-in state" in log
+    session.stop()
+
+
+def test_pairing_start_clears_auth_without_creds(tmp_path):
+    proc = FakeSidecarProc()
+    session = _pairing(tmp_path, proc)
+    _seed_auth(session, "not json at all {", extra_files=("orphan.json",))
+    session.start()
+    assert list(session.auth_dir.iterdir()) == []
+    session.stop()
+
+
+def test_pairing_start_keeps_registered_auth_untouched(tmp_path):
+    proc = FakeSidecarProc()
+    session = _pairing(tmp_path, proc)
+    creds = '{"registered": true, "me": {"id": "923001234567@s.whatsapp.net"}}'
+    _seed_auth(session, creds, extra_files=("session-keep.json",))
+    session.start()
+    # a completed pairing is never cleared — files byte-identical
+    assert (session.auth_dir / "creds.json").read_text(
+        encoding="utf-8"
+    ) == creds
+    assert (session.auth_dir / "session-keep.json").exists()
+    log = session.log_file.read_text(encoding="utf-8")
+    assert "cleared any partial sign-in state" not in log
+    # and the session reports the existing link as connected
+    assert session.poll().state == "connected"
+    session.stop()
+
+
+def test_pairing_start_with_no_auth_dir_at_all(tmp_path):
+    proc = FakeSidecarProc()
+    session = _pairing(tmp_path, proc)
+    assert not session.auth_dir.exists()
+    status = session.start()
+    assert status.state == "starting"
+    log = session.log_file.read_text(encoding="utf-8")
+    assert "cleared any partial sign-in state" in log
+    session.stop()
+
+
 # -------------------------------------------------------------- help text
 
 def test_help_text_is_transport_neutral():

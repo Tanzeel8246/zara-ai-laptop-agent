@@ -10,7 +10,7 @@
 ; it in CI as well.
 
 #define AppName "CodeHubb Assistant"
-#define AppVersion "1.0.5"
+#define AppVersion "1.0.6"
 #define AppPublisher "CodeHubb"
 #define AppExeName "CodeHubbAssistant.exe"
 

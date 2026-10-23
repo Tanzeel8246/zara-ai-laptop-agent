@@ -22,10 +22,28 @@ The sidecar's stdout/stderr go to .runtime/whatsapp/pairing.log (never
 in the status detail, so "exit code 1" always arrives with the actual
 Node error attached. Diagnostics bundles the same log.
 
+Pairing-code linking (Hotfix 1.0.6): start(method="code", number=...)
+passes WA_PAIRING_METHOD/WA_PAIRING_NUMBER/WA_PAIRING_CODE_FILE to the
+sidecar, which requests an 8-character code from WhatsApp (typed on the
+phone under "Link with phone number instead") and writes it to
+pairing-code.txt; poll() merges it into the status as pairing_code. If
+the code request fails, the sidecar keeps the QR flow running and poll()
+simply reports the QR as before.
+
+Pristine attempts (Hotfix 1.0.6): every wizard pairing spawn first
+clears any WhatsApp auth state that is not a COMPLETED pairing (creds
+absent, unreadable, or registered != true) — half-finished state left by
+failed attempts is a prime suspect in repeated refusals, so each attempt
+starts clean. A registered (successfully paired) session is never
+touched. One line about the clearing goes to pairing.log.
+
 The Popen factory is injectable for tests.
 """
 
+import json
 import os
+import re
+import shutil
 import subprocess
 import sys
 from dataclasses import dataclass
@@ -50,6 +68,33 @@ ADDR_IN_USE_DETAIL = (
     "left over from an earlier test. End the node.exe process(es) in "
     "Task Manager or restart the PC, then try again."
 )
+WAITING_CODE_DETAIL = (
+    "On your phone: WhatsApp → Linked devices → Link a device → "
+    "“Link with phone number instead” → enter the code shown below."
+)
+AUTH_CLEARED_LOG_LINE = (
+    "[pairing] no completed WhatsApp pairing found — cleared any partial "
+    "sign-in state so this pairing attempt starts clean"
+)
+
+
+def normalize_pairing_number(text):
+    """Digits-only international number: strips +, spaces, dashes and a
+    leading 00 international prefix ("+92 300-1234567" → "923001234567")."""
+    digits = re.sub(r"\D", "", str(text or ""))
+    if digits.startswith("00"):
+        digits = digits[2:]
+    return digits
+
+
+def format_pairing_code(code):
+    """Display form of a pairing code: an 8-character code is grouped
+    4-4 ("ABCDEFGH" → "ABCD-EFGH", the way WhatsApp shows it); anything
+    else is shown exactly as received."""
+    code = str(code or "").strip()
+    if len(code) == 8:
+        return f"{code[:4]}-{code[4:]}"
+    return code
 
 
 def session_log_lines(log_path):
@@ -106,9 +151,10 @@ def stopped_detail(log_path, rc):
 
 @dataclass
 class PairingStatus:
-    state: str          # starting | installing | waiting_qr | connected | logged_out | error | stopped
+    state: str          # starting | installing | waiting_qr | waiting_code | connected | logged_out | error | stopped
     qr: str = ""        # the QR payload while state == waiting_qr
     detail: str = ""
+    pairing_code: str = ""  # the raw code from the sidecar while state == waiting_code
 
 
 class PairingSession:
@@ -118,8 +164,11 @@ class PairingSession:
         self.wa_dir = self.root / ".runtime" / "whatsapp"
         self.auth_dir = self.wa_dir / "auth"
         self.qr_file = self.wa_dir / "qr.txt"
+        self.code_file = self.wa_dir / "pairing-code.txt"
         self.log_file = self.wa_dir / "pairing.log"
         self.port = port
+        self._pairing_method = "qr"   # or "code" — set by start()
+        self._pairing_number = ""     # digits only — set by start()
         self._popen = popen or subprocess.Popen
         self._node = node  # None = resolve in start()
         self._npm = npm    # None = resolve beside node in start()
@@ -130,12 +179,27 @@ class PairingSession:
         self._log_handle = None
         self._error = ""
 
-    def start(self):
-        """Spawn the sidecar for pairing. Returns the first status."""
+    def start(self, method="qr", number=""):
+        """Spawn the sidecar for pairing. Returns the first status.
+
+        method="code" + number=<the account's own number, international>
+        selects pairing-code linking; anything else is the QR flow,
+        exactly as before. The agent's supervisor never calls this — it
+        spawns its sidecar itself, without the pairing env, so agent
+        runs are unaffected.
+        """
         if self._install_proc is not None and self._install_proc.poll() is None:
             return self.poll()
         if self._proc is not None and self._proc.poll() is None:
             return self.poll()
+        self._pairing_method = (
+            "code" if str(method or "").strip().lower() == "code" else "qr"
+        )
+        self._pairing_number = (
+            normalize_pairing_number(number)
+            if self._pairing_method == "code"
+            else ""
+        )
         self._error = ""
         node = self._node
         if node is None:
@@ -209,12 +273,63 @@ class PairingSession:
             except OSError:
                 pass
 
+    def _auth_registered(self):
+        """True ONLY when creds.json proves a completed pairing.
+
+        Baileys' multi-file auth state writes creds.json early (keys,
+        noise material) and flips "registered" to true only when the
+        phone has actually linked — so presence alone is not proof.
+        Anything missing, unreadable or not-exactly-true is "not a
+        completed pairing".
+        """
+        try:
+            data = json.loads(
+                (self.auth_dir / "creds.json").read_text(encoding="utf-8")
+            )
+        except (OSError, ValueError):
+            return False
+        return isinstance(data, dict) and data.get("registered") is True
+
+    def _clear_stale_auth(self, log_handle):
+        """Clear a partial (never-completed) sign-in state, if present.
+
+        Runs before every wizard pairing spawn so each attempt starts
+        pristine — stale partial auth is a prime suspect when WhatsApp
+        keeps refusing links. HARD RULE: a registered session (a phone
+        really is linked) is left exactly as-is; the registration check
+        above is the only gate and it runs before anything is deleted.
+        """
+        if self._auth_registered():
+            return
+        if self.auth_dir.is_dir():
+            for entry in self.auth_dir.iterdir():
+                try:
+                    if entry.is_dir() and not entry.is_symlink():
+                        shutil.rmtree(entry)
+                    else:
+                        entry.unlink()
+                except OSError:
+                    pass
+        if log_handle is not None:
+            try:
+                log_handle.write(
+                    (AUTH_CLEARED_LOG_LINE + "\n").encode("utf-8")
+                )
+                log_handle.flush()
+            except OSError:
+                pass
+
     def _spawn_sidecar(self, node):
         sidecar_dir = self.root / "sidecar"
         self.wa_dir.mkdir(parents=True, exist_ok=True)
-        # A stale QR from an earlier run must never be shown as fresh.
+        # A stale QR (or pairing code) from an earlier run must never be
+        # shown as fresh.
         try:
             self.qr_file.unlink()
+        except OSError:
+            pass
+        try:
+            self.code_file.unlink()
         except OSError:
             pass
         env = dict(
@@ -223,11 +338,18 @@ class PairingSession:
             WA_AUTH_DIR=str(self.auth_dir),
             WA_MEDIA_DIR=str(self.wa_dir / "media"),
             WA_QR_FILE=str(self.qr_file),
+            WA_PAIRING_METHOD=self._pairing_method,
+            WA_PAIRING_NUMBER=self._pairing_number,
+            WA_PAIRING_CODE_FILE=str(self.code_file),
         )
         # The sidecar's output IS the diagnosis when it dies — until
         # 1.0.2 it went to DEVNULL and a crash surfaced as a bare
         # "exit code 1" with the real Node error thrown away.
         log_handle = self._open_log()
+        # Pristine start (1.0.6): clear any never-completed sign-in
+        # state BEFORE the bridge reads it; a completed pairing is
+        # never touched (see _clear_stale_auth).
+        self._clear_stale_auth(log_handle)
         kwargs = {"cwd": str(self.root), "env": env}
         if log_handle is not None:
             kwargs["stdout"] = log_handle
@@ -265,6 +387,16 @@ class PairingSession:
             )
         if (self.auth_dir / "creds.json").exists():
             return PairingStatus("connected", detail="Phone linked — WhatsApp is ready.")
+        if self._pairing_method == "code":
+            code = self._read_pairing_code()
+            if code:
+                return PairingStatus(
+                    "waiting_code", pairing_code=code,
+                    detail=WAITING_CODE_DETAIL,
+                )
+            # No code (yet, or the request failed): fall through to the
+            # QR status below — the sidecar keeps the QR flow running as
+            # the fallback, and the wizard shows it.
         if self.qr_file.exists():
             try:
                 qr = self.qr_file.read_text(encoding="utf-8").strip()
@@ -276,6 +408,14 @@ class PairingSession:
                     detail="On your phone: WhatsApp → Settings → Linked devices → Link a device.",
                 )
         return PairingStatus("starting", detail="Starting the WhatsApp bridge…")
+
+    def _read_pairing_code(self):
+        """The code the sidecar wrote, or "" — the spawn unlinked any
+        stale file, so whatever is here belongs to this attempt."""
+        try:
+            return self.code_file.read_text(encoding="utf-8").strip()
+        except OSError:
+            return ""
 
     def _poll_install(self):
         """Advance the first-run package install started by start()."""
