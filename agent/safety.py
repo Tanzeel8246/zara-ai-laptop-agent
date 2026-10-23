@@ -185,12 +185,14 @@ class ToolExecutor:
             for index, file_path in enumerate(files):
                 await chan.send_file(file_path, captions[index] if index < len(captions) else None)
             if name == "speak":
-                # Preserve the original duplicate-voice guard exactly.
+                # Preserve the original duplicate-voice guard exactly — keyed
+                # by the same session key the session layer checks.
                 chan.spoke = True
                 try:
+                    from .transport import session_key_of
                     from .voice import SPOKE_CHANNELS
 
-                    SPOKE_CHANNELS.add(chan.channel_id)
+                    SPOKE_CHANNELS.add(session_key_of(chan))
                 except Exception:  # noqa: BLE001
                     pass
 
