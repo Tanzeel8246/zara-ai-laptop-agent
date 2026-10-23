@@ -16,8 +16,10 @@ import { WebSocketServer } from "ws";
 import qrcode from "qrcode-terminal";
 import pino from "pino";
 import makeWASocket, {
+  Browsers,
   DisconnectReason,
   downloadMediaMessage,
+  fetchLatestBaileysVersion,
   useMultiFileAuthState,
 } from "@whiskeysockets/baileys";
 
@@ -228,7 +230,45 @@ let reconnectDelay = 2000;
 
 async function connect() {
   const { state, saveCreds } = await useMultiFileAuthState(AUTH_DIR);
-  sock = makeWASocket({ auth: state, logger, printQRInTerminal: false });
+
+  // Pairing hardening (1.0.5): negotiate the CURRENT WhatsApp protocol
+  // version instead of whatever stale constant the installed Baileys build
+  // happens to carry — WhatsApp refuses ("Couldn't link device") pairings
+  // that present an outdated version. A failed fetch (offline) falls back
+  // to the library default; it must never stop the sidecar from starting.
+  let waVersion;
+  try {
+    // Bounded wait: on a stalled network the fetch must not hold pairing
+    // hostage — after 10s the library default takes over.
+    const FETCH_TIMEOUT_MS = 10000;
+    const { version, isLatest } = await Promise.race([
+      fetchLatestBaileysVersion(),
+      new Promise((_, reject) =>
+        setTimeout(() => reject(new Error("timed out")), FETCH_TIMEOUT_MS)
+      ),
+    ]);
+    if (version) {
+      waVersion = version;
+      console.log(
+        `[sidecar] WhatsApp protocol version ${version.join(".")}${isLatest ? " (latest)" : ""}`
+      );
+    }
+  } catch (err) {
+    console.log(
+      `[sidecar] could not fetch the latest WhatsApp version (${err?.message || err}); ` +
+        "falling back to the Baileys built-in default"
+    );
+  }
+
+  sock = makeWASocket({
+    auth: state,
+    logger,
+    printQRInTerminal: false,
+    ...(waVersion ? { version: waVersion } : {}),
+    // Present as a mainstream desktop browser: unusual/absent client
+    // identities are a known trigger for WhatsApp pairing refusals.
+    browser: Browsers.windows("Chrome"),
+  });
 
   sock.ev.on("creds.update", saveCreds);
 
@@ -245,6 +285,10 @@ async function connect() {
 
   sock.ev.on("connection.update", async (update) => {
     const { connection, lastDisconnect, qr } = update;
+    if (connection === "connecting") {
+      // Visible in pairing.log: a pairing attempt is reaching the server.
+      console.log("[sidecar] connecting to WhatsApp…");
+    }
     if (qr) {
       // Fresh QR for every pairing attempt: console ASCII + file for the wizard.
       try {
@@ -268,6 +312,7 @@ async function connect() {
     }
     if (connection === "close") {
       const statusCode = lastDisconnect?.error?.output?.statusCode;
+      const reason = lastDisconnect?.error?.message || "";
       const loggedOut = statusCode === DisconnectReason.loggedOut;
       sock = null;
       waState = { type: "waiting", reason: "disconnected" };
@@ -277,7 +322,10 @@ async function connect() {
         console.error("[sidecar] logged out — pairing is gone, exiting with code 2");
         process.exit(LOGGED_OUT_EXIT);
       }
-      console.log(`[sidecar] connection closed (code ${statusCode}); reconnecting in ${reconnectDelay}ms`);
+      console.log(
+        `[sidecar] connection closed (code ${statusCode}${reason ? `: ${reason}` : ""}); ` +
+          `reconnecting in ${reconnectDelay}ms`
+      );
       setTimeout(() => connect().catch((e) => console.error("[sidecar] reconnect failed:", e)), reconnectDelay);
       reconnectDelay = Math.min(reconnectDelay * 2, 30000);
     }
